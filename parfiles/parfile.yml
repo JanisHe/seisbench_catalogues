@@ -1,0 +1,30 @@
+data:
+  starttime: 2024-03-01 00:00
+  endtime: 2024-03-03 00:00
+  sds_path: /home/jheuel/data/SDS
+  stations: ../station_json/FORGE.json
+  sampling_rate: 100
+picking:
+  P_threshold: 0.2
+  S_threshold: 0.2
+  batch_size: 512
+  blinding: [250, 250]
+  overlap: 1500
+  phasenet_model: diting
+  # phasenet_model: /home/jheuel/code/train_phasenet/models/induced_stead_real_noise.pth
+velocity_model:
+  p_velocity: 5
+  s_velocity: 2.9
+  association_cutoff_distance: 100
+  tolerance: 2.0
+association:
+  zlim: [0, 30]
+  n_picks: 14
+  n_p_picks: 8 # Minumum required number P picks for an event.
+  n_s_picks: 6 # Minumum required number S picks for an event.
+  n_p_and_s_picks: 6  # Minumum required number of stations that have both P and S pick for an event.
+  time_before: 5
+
+# General parameters
+nworkers: 4
+filename: "stead_example.xml"
