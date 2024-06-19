@@ -2,6 +2,8 @@ import glob
 import os
 import json
 import pathlib
+import copy
+import pickle
 
 import tqdm
 
@@ -150,7 +152,8 @@ def daily_picks(julday: int, year: int, starttime: obspy.UTCDateTime,
                 station: str, network: str, channel_code: str,
                 seisbench_model, batch_size: int = 512, P_threshold: float = 0.1,
                 S_threshold: float = 0.1, output_format: str = "pyocto",
-                sampling_rate: (None, float) = None, **kwargs):
+                sampling_rate: (None, float) = None,
+                pathname: str = "tmp_picks", **kwargs):
     """
 
     :param julday:
@@ -166,6 +169,7 @@ def daily_picks(julday: int, year: int, starttime: obspy.UTCDateTime,
     :param P_threshold:
     :param S_threshold:
     :param output_format:
+    :param pathname:
     :param kwargs:
     :return:
     """
@@ -180,9 +184,20 @@ def daily_picks(julday: int, year: int, starttime: obspy.UTCDateTime,
                         P_threshold=P_threshold, S_threshold=S_threshold,
                         output_format=output_format, stream=stream, **kwargs)
 
-        return picks
-    else:
-        return pd.DataFrame()
+        # Save picks as pickle
+        filename = os.path.join(pathname, f"{station}_{network}_{year}_{julday}.pick")
+        with open(filename, "wb") as handle:
+            pickle.dump(picks, handle)
+
+
+def picks2seisbench(picks: dict):
+    """
+    Convert dictionary with picks for each station (key is station) to picklist in SeisBench format.
+    :param picks:
+    :return:
+    """
+    pass
+
 
 
 def convert_station_json(stations: dict) -> pd.DataFrame:
@@ -372,6 +387,35 @@ def picks_per_station(seisbench_picks: list) -> dict:
         station_picks[trace_id] = pd.DataFrame(picks)
 
     return station_picks
+
+
+def get_tmp_picks(dirname):
+    """
+
+    :param dirname:
+    :return:
+    """
+    files = glob.glob(os.path.join(dirname, "*.pick"))
+    picks_dict = {}
+    for index, filename in enumerate(files):
+        with open(filename, "rb") as handle:
+            picks = pickle.load(handle)
+
+        if index == 0:
+            all_picks = picks.picks
+        else:
+            all_picks += picks.picks
+
+        # # Write all picks in one dataframe and one dataframe for each station
+        # if len(pick_df) > 0:
+        #     trace_id = pick_df["trace_id"][0]
+        #     if trace_id in picks_dict.keys():
+        #         picks_dict[trace_id] = pd.concat(objs=[pick_df, picks_dict[trace_id]],
+        #                                          ignore_index=True)
+        #     else:
+        #         picks_dict.update({trace_id: pick_df})
+
+    return all_picks
 
 
 def tmp_picks(dirname):

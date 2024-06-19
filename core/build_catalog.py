@@ -1,5 +1,6 @@
 import os
 import sys
+import pickle
 
 import obspy
 import yaml
@@ -13,7 +14,8 @@ import tqdm
 import pandas as pd
 import seisbench.models as sbm
 
-from functions import date_list, load_stations, daily_picks, associate_pyocto, count_picks, picks2df, picks_per_station
+from functions import (date_list, load_stations, daily_picks, associate_pyocto, count_picks, picks2df,
+                       picks_per_station, get_tmp_picks)
 
 
 def main(parfile):
@@ -45,7 +47,6 @@ def main(parfile):
     stations = load_stations(station_json=parameters["data"]["stations"])
 
     # Loop with joblib over all stations, get waveforms for each day and pick
-    picks = []
     dates = date_list(start_date=obspy.UTCDateTime(parameters["data"]["starttime"]),
                       end_date=obspy.UTCDateTime(parameters["data"]["endtime"]))
 
@@ -55,6 +56,12 @@ def main(parfile):
     else:
         sampling_rate = None
 
+    # Create directory for temporary picks
+    tmp_pick_dirname = os.path.join(dirname, "tmp_picks")
+    if os.path.isdir(tmp_pick_dirname):
+        shutil.rmtree(tmp_pick_dirname)
+    os.makedirs(tmp_pick_dirname)
+
     joblib_pool = joblib.Parallel(n_jobs=parameters.get("nworkers"))
     for station in stations["id"]:
         print("Picking phases at station", station)
@@ -63,19 +70,22 @@ def main(parfile):
             endtime=obspy.UTCDateTime(parameters["data"]["endtime"]), sds_path=parameters["data"]["sds_path"],
             network=station.split(".")[0], station=station.split(".")[1], channel_code="*",
             seisbench_model=pn_model, output_format="pyocto", sampling_rate=sampling_rate,
-            **parameters["picking"]
+            pathname=tmp_pick_dirname, **parameters["picking"]
         )
                                       for date in tqdm.tqdm(dates))
 
-        # Collect all picks
-        for index in range(len(picks_generator)):
-            try:
-                picks += picks_generator[index].picks
-            except AttributeError:
-                print("Did not find picks at station", station)
+        # for index in range(len(picks_generator)):
+        #     try:
+        #         picks += picks_generator[index].picks
+        #     except AttributeError:
+        #         print("Did not find picks at station", station)
+
+    # Collect all picks from temporary saved picks and delete temporary picks
+    picks = get_tmp_picks(dirname=tmp_pick_dirname)
+    shutil.rmtree(tmp_pick_dirname)
 
     # Convert picks to pandas dataframe
-    picks_df = picks2df(seisbench_picks=picks)
+    # picks_df = picks2df(seisbench_picks=picks)
 
     # Convert picks of each station to single dataframe
     picks_station = picks_per_station(seisbench_picks=picks)
@@ -96,11 +106,11 @@ def main(parfile):
         **parameters["association"])
     print(f"Detected {len(catalog)} events. ")
 
-    # Save picks as csv and catalog as xmlin separate directory
-    picks_filename = os.path.join(dirname, f'{pathlib.Path(parameters["filename"]).stem}.csv')
+    # Save picks as pickle and catalog as xmlin separate directory
     catalog_filename = os.path.join(dirname, parameters["filename"])
-    picks_df.to_csv(path_or_buf=picks_filename)
     catalog.write(filename=catalog_filename, format="QUAKEML")
+    with open(os.path.join(dirname, f'{pathlib.Path(parameters["filename"]).stem}.picks'), "wb") as handle:
+        pickle.dump(obj=picks, file=handle)
 
     # Save picks for each station
     # First, delete existing files
