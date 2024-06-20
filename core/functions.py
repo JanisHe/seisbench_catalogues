@@ -185,19 +185,9 @@ def daily_picks(julday: int, year: int, starttime: obspy.UTCDateTime,
                         output_format=output_format, stream=stream, **kwargs)
 
         # Save picks as pickle
-        filename = os.path.join(pathname, f"{station}_{network}_{year}_{julday}.pick")
+        filename = os.path.join(pathname, f"{network}_{station}_{year}_{julday}.pick")
         with open(filename, "wb") as handle:
             pickle.dump(picks, handle)
-
-
-def picks2seisbench(picks: dict):
-    """
-    Convert dictionary with picks for each station (key is station) to picklist in SeisBench format.
-    :param picks:
-    :return:
-    """
-    pass
-
 
 
 def convert_station_json(stations: dict) -> pd.DataFrame:

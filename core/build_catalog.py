@@ -65,7 +65,7 @@ def main(parfile):
     joblib_pool = joblib.Parallel(n_jobs=parameters.get("nworkers"))
     for station in stations["id"]:
         print("Picking phases at station", station)
-        picks_generator = joblib_pool(joblib.delayed(daily_picks)(
+        joblib_pool(joblib.delayed(daily_picks)(
             julday=date[1], year=date[0], starttime=obspy.UTCDateTime(parameters["data"]["starttime"]),
             endtime=obspy.UTCDateTime(parameters["data"]["endtime"]), sds_path=parameters["data"]["sds_path"],
             network=station.split(".")[0], station=station.split(".")[1], channel_code="*",
@@ -74,28 +74,12 @@ def main(parfile):
         )
                                       for date in tqdm.tqdm(dates))
 
-        # for index in range(len(picks_generator)):
-        #     try:
-        #         picks += picks_generator[index].picks
-        #     except AttributeError:
-        #         print("Did not find picks at station", station)
-
-    # Collect all picks from temporary saved picks and delete temporary picks
+    # Collect all picks from temporary saved picks
     picks = get_tmp_picks(dirname=tmp_pick_dirname)
-    shutil.rmtree(tmp_pick_dirname)
-
-    # Convert picks to pandas dataframe
-    # picks_df = picks2df(seisbench_picks=picks)
 
     # Convert picks of each station to single dataframe
     picks_station = picks_per_station(seisbench_picks=picks)
 
-    # velocity_model = pyocto.VelocityModel0D(
-    #     p_velocity=parameters["p_velocity"],
-    #     s_velocity=parameters["s_velocity"],
-    #     tolerance=parameters["tolerance"],
-    #     association_cutoff_distance=parameters["cutoff_distance"],
-    # )
     velocity_model = pyocto.VelocityModel0D(**parameters["velocity_model"])
 
     # Generate catalogue
@@ -131,6 +115,9 @@ def main(parfile):
             for phase in phase_count[id]:
                 string += f"{phase}: {phase_count[id][phase]} "
             f.write(string + "\n")
+
+    # Delete temporary pick files
+    shutil.rmtree(tmp_pick_dirname)
 
 
 
