@@ -199,7 +199,7 @@ def convert_station_json(stations: dict) -> pd.DataFrame:
     station_df = []
     for station in stations.keys():
         station_df.append(
-            {"id": f"{stations[station]['network']}.{station}.{stations[station]['location_code']}",
+            {"id": station,
              "latitude": stations[station]["coords"][0],
              "longitude": stations[station]["coords"][1],
              "elevation": stations[station]["coords"][2]}
@@ -309,6 +309,12 @@ def associate_pyocto(station_json: (str, pd.DataFrame), picks, velocity_model, *
     # Start association
     events, assignments = associator.associate_seisbench(picks, stations)
     associator.transform_events(events)
+
+    # Proof whether events have been detected
+    if len(events) == 0:
+        return obspy.Catalog()
+
+    # Assign correct time to event
     events["time"] = events["time"].apply(datetime.datetime.fromtimestamp, tz=datetime.timezone.utc)
     assignments["time"] = assignments["time"].apply(datetime.datetime.fromtimestamp, tz=datetime.timezone.utc)
 

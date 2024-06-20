@@ -65,8 +65,9 @@ def main(parfile):
     joblib_pool = joblib.Parallel(n_jobs=parameters.get("nworkers"))
     with tqdm.tqdm(total=len(stations["id"]) * len(dates)) as pbar:
         for station in stations["id"]:
-            pbar.set_postfix_str(f"Picking phases at station {station}")
-            # print("Picking phases at station", station)
+            pbar.set_postfix_str(f"Picking phases at station {station}")   # Update progressbar
+
+            # Start parallel picking over days for each station
             joblib_pool(
                 joblib.delayed(daily_picks)(
                     julday=date[1],
@@ -113,6 +114,9 @@ def main(parfile):
         shutil.rmtree(os.path.join(dirname, "picks"))
     if os.path.isdir(os.path.join(dirname, "picks")) is False:
         os.makedirs(os.path.join(dirname, "picks"))
+
+    # Note, picks for each station are saved in csv-format, since functions for plotting are written to read these
+    # files. For a later association, all picks are saved as a pickle file.
     for trace_id, station_picks in picks_station.items():
         station_pick_fname = os.path.join(dirname, "picks", f"{trace_id}.csv")
         station_picks.to_csv(path_or_buf=station_pick_fname, mode='w')
