@@ -63,16 +63,27 @@ def main(parfile):
     os.makedirs(tmp_pick_dirname)
 
     joblib_pool = joblib.Parallel(n_jobs=parameters.get("nworkers"))
-    for station in stations["id"]:
-        print("Picking phases at station", station)
-        joblib_pool(joblib.delayed(daily_picks)(
-            julday=date[1], year=date[0], starttime=obspy.UTCDateTime(parameters["data"]["starttime"]),
-            endtime=obspy.UTCDateTime(parameters["data"]["endtime"]), sds_path=parameters["data"]["sds_path"],
-            network=station.split(".")[0], station=station.split(".")[1], channel_code="*",
-            seisbench_model=pn_model, output_format="pyocto", sampling_rate=sampling_rate,
-            pathname=tmp_pick_dirname, **parameters["picking"]
-        )
-                                      for date in tqdm.tqdm(dates))
+    with tqdm.tqdm(total=len(stations["id"]) * len(dates)) as pbar:
+        for station in stations["id"]:
+            pbar.set_postfix_str(f"Picking phases at station {station}")
+            # print("Picking phases at station", station)
+            joblib_pool(
+                joblib.delayed(daily_picks)(
+                    julday=date[1],
+                    year=date[0],
+                    starttime=obspy.UTCDateTime(parameters["data"]["starttime"]),
+                    endtime=obspy.UTCDateTime(parameters["data"]["endtime"]),
+                    sds_path=parameters["data"]["sds_path"],
+                    network=station.split(".")[0],
+                    station=station.split(".")[1],
+                    channel_code="*",
+                    seisbench_model=pn_model,
+                    output_format="pyocto",
+                    sampling_rate=sampling_rate,
+                    pathname=tmp_pick_dirname, **parameters["picking"]
+                )
+                for date in dates)
+            pbar.update(len(dates))
 
     # Collect all picks from temporary saved picks
     picks = get_tmp_picks(dirname=tmp_pick_dirname)
