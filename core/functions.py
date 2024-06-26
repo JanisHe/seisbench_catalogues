@@ -236,6 +236,10 @@ def area_limits(stations: (pd.DataFrame, dict)) -> dict:
         "longitude": (np.min(stations["longitude"] - 0.2), np.max(stations["longitude"]) + 0.2)
     }
 
+    # Add center to limits
+    limits["center"] = ((limits["latitude"][1] - limits["latitude"][0]) / 2 + limits["latitude"][0],
+                        (limits["longitude"][1] - limits["longitude"][0]) / 2 + limits["longitude"][0])
+
     return limits
 
 

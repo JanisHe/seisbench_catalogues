@@ -14,8 +14,9 @@ import tqdm
 import pandas as pd
 import seisbench.models as sbm
 
-from functions import (date_list, load_stations, daily_picks, associate_pyocto, count_picks, picks2df,
-                       picks_per_station, get_tmp_picks)
+from core.functions import (date_list, load_stations, daily_picks, associate_pyocto, count_picks, picks2df,
+                            picks_per_station, get_tmp_picks)
+from core.utils import nll_wrapper
 
 
 def main(parfile):
@@ -61,7 +62,9 @@ def main(parfile):
     if os.path.isdir(tmp_pick_dirname):
         shutil.rmtree(tmp_pick_dirname)
     os.makedirs(tmp_pick_dirname)
+    #######################################################################
 
+    # Start phase picking
     joblib_pool = joblib.Parallel(n_jobs=parameters.get("nworkers"))
     with tqdm.tqdm(total=len(stations["id"]) * len(dates)) as pbar:
         for station in stations["id"]:
@@ -91,20 +94,42 @@ def main(parfile):
 
     # Convert picks of each station to single dataframe
     picks_station = picks_per_station(seisbench_picks=picks)
+    #######################################################################
 
-    velocity_model = pyocto.VelocityModel0D(**parameters["velocity_model"])
+    # Association
+    if parameters["association"].pop("method").lower() == "pyocto":
+        velocity_model = pyocto.VelocityModel0D(**parameters["velocity_model"])
 
-    # Generate catalogue
-    catalog = associate_pyocto(
-        station_json=stations,
-        picks=picks,
-        velocity_model=velocity_model,
-        **parameters["association"])
-    print(f"Detected {len(catalog)} events. ")
+        # Generate catalogue
+        catalog = associate_pyocto(
+            station_json=stations,
+            picks=picks,
+            velocity_model=velocity_model,
+            **parameters["association"])
+        print(f"Detected {len(catalog)} events after association. ")
+    elif parameters["association"].pop("method").lower() == "gamma":
+        # TODO: Implement GaMMA as association (requires further/other parameters in parfile)
+        msg = "Gamma is not implemented yet."
+        raise ValueError(msg)
+    else:
+        msg = f"Method {parameters['association']['method']} is not implemented."
+        raise ValueError(msg) 
+    #######################################################################
 
+    # Relocate earthquakes in catalog with NonLinLoc
+    # TODO: NLL package can used pre calculated travel times. Try to find pre calcualted travel times, instead
+    #       of computing new.
+    if parameters.get("nonlinloc"):
+        catalog = nll_wrapper(catalog=catalog,
+                              station_json=stations,
+                              nll_basepath=parameters["nonlinloc"]["nll_basepath"],
+                              vel_model=parameters["nonlinloc"]["velocity_model"])
+
+    # Assign associated events to final catalog and create output files
     # Save picks as pickle and catalog as xmlin separate directory
     catalog_filename = os.path.join(dirname, parameters["filename"])
     catalog.write(filename=catalog_filename, format="QUAKEML")
+    print(f"Wrote {len(catalog)} events to final catalogue.")
     with open(os.path.join(dirname, f'{pathlib.Path(parameters["filename"]).stem}.picks'), "wb") as handle:
         pickle.dump(obj=picks, file=handle)
 
