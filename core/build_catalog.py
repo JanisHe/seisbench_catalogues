@@ -97,9 +97,11 @@ def main(parfile):
     #######################################################################
 
     # Association
+    # TODO: If nonlinloc in parameters, load velocity model and define 1D velocity model for PyOcto and
+    #       use GaMMA1D.
     if parameters["association"].get("method").lower() == "pyocto":
         parameters["association"].pop("method")
-        velocity_model = pyocto.VelocityModel0D(**parameters["velocity_model"])
+        velocity_model = pyocto.VelocityModel0D(**parameters["0Dvelocity_model"])
 
         # Generate catalogue
         catalog = associate_pyocto(
@@ -113,20 +115,20 @@ def main(parfile):
             picks=picks,
             stations=stations,
             ncpu=parameters["nworkers"],
-            p_vel=parameters["velocity_model"]["p_velocity"],
-            s_vel=parameters["velocity_model"]["s_velocity"],
+            p_vel=parameters["0Dvelocity_model"]["p_velocity"],
+            s_vel=parameters["0Dvelocity_model"]["s_velocity"],
             **parameters["association"]
         )
     else:
         msg = f"Method {parameters['association']['method']} is not implemented."
         raise ValueError(msg)
 
-    print(f"Detected {len(catalog)} events after association.")
+    print(f"\nDetected {len(catalog)} events after association.\n")
     #######################################################################
 
     # Relocate earthquakes in catalog with NonLinLoc
     # TODO: NLL package can used pre calculated travel times. Try to find pre calcualted travel times, instead
-    #       of computing new.
+    #       of computing new. Especially worthful, when a accurate velocoty model is used
     if parameters.get("nonlinloc"):
         catalog = nll_wrapper(catalog=catalog,
                               station_json=stations,
