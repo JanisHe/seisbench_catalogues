@@ -1,21 +1,21 @@
-import glob
 import os
+import glob
 import json
 import pathlib
-import copy
-import pickle
-
 import tqdm
-
+import pickle
 import datetime
 import obspy
-import pandas as pd
 import pyocto
+
+import pandas as pd
 import numpy as np
+from pyproj import Proj
 
 from obspy.core.event.origin import Pick, Origin
 from obspy.core.event.event import Event
-from obspy.core.event.base import WaveformStreamID
+from obspy.core.event.base import WaveformStreamID, Comment
+from gamma.utils import association
 
 
 def date_list(start_date, end_date):
@@ -353,7 +353,174 @@ def associate_pyocto(station_json: (str, pd.DataFrame), picks, velocity_model, *
     return obspy.Catalog(event_lst)
 
 
-def picks_per_station(seisbench_picks: list) -> dict:
+def associate_gamma(picks, stations, ncpu=4, use_dbscan=True, use_amplitude=False,
+                    zlim=(0, 30), p_vel=5.9, s_vel=3.5, method="BGMM",
+                    inital_points=[1, 1, 1], covariance_prior=(5, 5),
+                    oversample_factor=10, dbscan_eps=4, dbscan_min_samples=5,
+                    min_picks_per_eq=8, min_p_picks_per_eq=4,
+                    min_s_picks_per_eq=4, max_sigma11=2.0, max_sigma22=1.0,
+                    max_sigma12=1.0):
+    """
+
+    :param picks:
+    :param stations:
+    :param ncpu:
+    :param use_dbscan:
+    :param use_amplitude:
+    :param zlim:
+    :param p_vel:
+    :param s_vel:
+    :param method:
+    :param inital_points:
+    :param covariance_prior:
+    :param oversample_factor:
+    :param dbscan_eps:
+    :param dbscan_min_samples:
+    :param min_picks_per_eq:
+    :param min_p_picks_per_eq:
+    :param min_s_picks_per_eq:
+    :param max_sigma11:
+    :param max_sigma22:
+    :param max_sigma12:
+    :return:
+    """
+    # Load station_json
+    if isinstance(stations, str):
+        stations = load_stations(station_json=stations)
+
+    # Convert picks to required format
+    picks = picks_per_station(seisbench_picks=picks,
+                              association_method="gamma")
+
+    # Get grid from latitude and longitude
+    config = area_limits(stations=stations)
+
+    # Create projection from pyproj. Use a string that is then transfered to Proj (https://proj.org)
+    proj = Proj(f"+proj=sterea +lat_0={config['center'][0]} +lon_0={config['center'][1]} +units=km")
+
+    # Compute boundaries for x and y
+    ylim1, xlim1 = proj(latitude=config['latitude'][0], longitude=config['longitude'][0])
+    ylim2, xlim2 = proj(latitude=config['latitude'][1], longitude=config['longitude'][1])
+    config['x(km)'] = [xlim1, xlim2]
+    config["y(km)"] = [ylim1, ylim2]
+
+    # Read gamma_score from kwargs
+    # gamma_score_threshold = kwargs.get("gamma_score")
+    # if not gamma_score_threshold:
+    #     gamma_score_threshold = -99
+
+    # Return empty event list, when no picks are found
+    if len(picks) == 0:
+        return []
+
+    # Make config dict for GaMMA
+    # Config for earthquake location
+    config["ncpu"] = ncpu
+    config["dims"] = ['x(km)', 'y(km)', 'z(km)']
+    config["use_dbscan"] = use_dbscan
+    config["use_amplitude"] = use_amplitude
+    config["z(km)"] = zlim
+    config["vel"] = {"p": p_vel, "s": s_vel}
+    config["method"] = method
+    config["initial_points"] = inital_points
+    config["covariance_prior"] = covariance_prior
+
+    config["bfgs_bounds"] = (
+                             (config["x(km)"][0] - 1, config["x(km)"][1] + 1),
+                             (config["y(km)"][0] - 1, config["y(km)"][1] + 1),
+                             (0, config["z(km)"][1] + 1),  # x
+                             (None, None),  # t
+                            )
+
+    # The initial number of clusters is determined by
+    # (Number of picks)/(Number of stations) * (oversampling factor).
+    if config["method"] == "BGMM":
+        config["oversample_factor"] = oversample_factor  # default is 10
+    if config["method"] == "GMM":
+        config["oversample_factor"] = oversample_factor
+
+    # DBSCAN
+    config["dbscan_eps"] = dbscan_eps
+    config["dbscan_min_samples"] = dbscan_min_samples
+
+    # filtering
+    config["min_picks_per_eq"] = min_picks_per_eq
+    config["min_p_picks_per_eq"] = min_p_picks_per_eq
+    config["min_s_picks_per_eq"] = min_s_picks_per_eq
+    config["max_sigma11"] = max_sigma11
+    config["max_sigma22"] = max_sigma22
+    config["max_sigma12"] = max_sigma12
+
+    # Transform station coordinates
+    stations[["x(km)", "y(km)"]] = stations.apply(
+        lambda x: pd.Series(proj(longitude=x.longitude, latitude=x.latitude)),
+        axis=1)
+    stations["z(km)"] = stations["elevation"].apply(lambda depth: -depth / 1e3)
+
+    # Do association
+    catalogs, assignments = association(picks, stations, config, method=config["method"])
+
+    catalog = pd.DataFrame(catalogs)
+    assignments = pd.DataFrame(assignments, columns=["pick_index", "event_index", "gamma_score"])
+    if len(catalog) > 0:
+        catalog.sort_values(by=["time"], inplace=True, ignore_index=True)
+    else:
+        msg = "Did not associate events"
+        raise Exception(msg)
+
+    # Transform earthquake locations to lat long
+    event_lat = []
+    event_long = []
+    for x, y in zip(catalog["x(km)"], catalog["y(km)"]):
+        long, lat = proj(x, y, inverse=True)
+        event_lat.append(lat)
+        event_long.append(long)
+    catalog["latitude"] = event_lat
+    catalog["longitude"] = event_long
+
+    # Create earthquake catalog
+    # Empty event lst
+    event_lst = []
+    # Loop over each event in GaMMA catalog
+    for event_count in range(len(catalog)):
+        event_idx = catalog["event_index"][event_count]
+        event_picks = [picks.iloc[i] for i in assignments[assignments["event_index"] == event_idx]["pick_index"]]
+
+        # Create dictionary for each station that contains P and S phases
+        # Create list with obspy picks class
+        picks_lst = []
+        for p in event_picks:
+            waveform_id = WaveformStreamID(network_code=p["id"].split(".")[0],
+                                           station_code=p["id"].split(".")[1])
+            comments = Comment(text=f'probability={p["prob"]}')
+            pick = Pick(time=obspy.UTCDateTime(p["timestamp"]),
+                        waveform_id=waveform_id,
+                        phase_hint=p["type"].upper(),
+                        comments=[comments])
+            picks_lst.append(pick)
+
+        origin = Origin(time=catalog["time"][event_count],
+                        longitude=catalog["longitude"][event_count],
+                        latitude=catalog["latitude"][event_count],
+                        depth=catalog["z(km)"][event_count] * 1e3)
+        comment = Comment(text="EQTransformer for picking and GaMMA for association")
+        gamma_score = Comment(text=f"gamma_score = {catalog['gamma_score'][event_count]}")
+        ev = Event(picks=picks_lst,
+                   force_resource_id=True,
+                   origins=[origin],
+                   comments=[comment, gamma_score])
+
+        # Append event to final event list
+        event_lst.append(ev)
+
+        # Remove events that are beneath a certain gamma_score threshold value
+        # if catalog["gamma_score"][event_count] >= gamma_score_threshold:
+        #     event_lst.append(ev)
+
+    return event_lst
+
+
+def pyocto_picks(seisbench_picks: list) -> dict:
     """
 
     :param seisbench_picks:
@@ -387,6 +554,41 @@ def picks_per_station(seisbench_picks: list) -> dict:
         station_picks[trace_id] = pd.DataFrame(picks)
 
     return station_picks
+
+
+def gamma_picks(seisbench_picks: list) -> pd.DataFrame:
+    """
+
+    :param seisbench_picks:
+    :return:
+    """
+    picks = []
+    for pick in seisbench_picks:
+        picks.append({
+            "id": pick.trace_id,
+            "timestamp": obspy.UTCDateTime(pick.peak_value).datetime,
+            "prob": pick.peak_value,
+            "type": pick.phase.lower()
+        })
+
+    return pd.DataFrame(picks)
+
+
+def picks_per_station(seisbench_picks: list,
+                      association_method: str = "pyocto") -> (dict, pd.DataFrame):
+    """
+
+    :param seisbench_picks:
+    :param association_method
+    :return:
+    """
+    if association_method == "pyocto":
+        return pyocto_picks(seisbench_picks=seisbench_picks)
+    elif association_method == "gamma":
+        return gamma_picks(seisbench_picks=seisbench_picks)
+    else:
+        msg = f"Method {association_method} for phase association is not implemented."
+        raise ValueError(msg)
 
 
 def get_tmp_picks(dirname):

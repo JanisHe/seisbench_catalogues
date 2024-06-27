@@ -14,8 +14,8 @@ import tqdm
 import pandas as pd
 import seisbench.models as sbm
 
-from core.functions import (date_list, load_stations, daily_picks, associate_pyocto, count_picks, picks2df,
-                            picks_per_station, get_tmp_picks)
+from core.functions import (date_list, load_stations, daily_picks, associate_pyocto, count_picks,
+                            picks_per_station, get_tmp_picks, associate_gamma)
 from core.utils import nll_wrapper
 
 
@@ -97,7 +97,8 @@ def main(parfile):
     #######################################################################
 
     # Association
-    if parameters["association"].pop("method").lower() == "pyocto":
+    if parameters["association"].get("method").lower() == "pyocto":
+        parameters["association"].pop("method")
         velocity_model = pyocto.VelocityModel0D(**parameters["velocity_model"])
 
         # Generate catalogue
@@ -107,10 +108,16 @@ def main(parfile):
             velocity_model=velocity_model,
             **parameters["association"])
         print(f"Detected {len(catalog)} events after association. ")
-    elif parameters["association"].pop("method").lower() == "gamma":
-        # TODO: Implement GaMMA as association (requires further/other parameters in parfile)
-        msg = "Gamma is not implemented yet."
-        raise ValueError(msg)
+    elif parameters["association"].get("method").lower() == "gamma":
+        parameters["association"].pop("method")
+        catalog = associate_gamma(
+            picks=picks,
+            stations=stations,
+            ncpu=parameters["nworkers"],
+            p_vel=parameters["velocity_model"]["p_velocity"],
+            s_vel=parameters["velocity_model"]["s_velocity"],
+            **parameters["association"]
+        )
     else:
         msg = f"Method {parameters['association']['method']} is not implemented."
         raise ValueError(msg) 
