@@ -394,13 +394,15 @@ def associate_gamma(picks, stations, ncpu=4, use_dbscan=True, use_amplitude=Fals
 
     # Get grid from latitude and longitude
     config = area_limits(stations=stations)
+    config["xlim_degree"] = config.pop("latitude")
+    config["ylim_degree"] = config.pop("longitude")
 
     # Create projection from pyproj. Use a string that is then transfered to Proj (https://proj.org)
     proj = Proj(f"+proj=sterea +lat_0={config['center'][0]} +lon_0={config['center'][1]} +units=km")
 
     # Compute boundaries for x and y
-    ylim1, xlim1 = proj(latitude=config['latitude'][0], longitude=config['longitude'][0])
-    ylim2, xlim2 = proj(latitude=config['latitude'][1], longitude=config['longitude'][1])
+    ylim1, xlim1 = proj(latitude=config['xlim_degree'][0], longitude=config['ylim_degree'][0])
+    ylim2, xlim2 = proj(latitude=config['xlim_degree'][1], longitude=config['ylim_degree'][1])
     config['x(km)'] = [xlim1, xlim2]
     config["y(km)"] = [ylim1, ylim2]
 
@@ -566,7 +568,7 @@ def gamma_picks(seisbench_picks: list) -> pd.DataFrame:
     for pick in seisbench_picks:
         picks.append({
             "id": pick.trace_id,
-            "timestamp": obspy.UTCDateTime(pick.peak_value).datetime,
+            "timestamp": obspy.UTCDateTime(pick.peak_time).datetime,
             "prob": pick.peak_value,
             "type": pick.phase.lower()
         })
