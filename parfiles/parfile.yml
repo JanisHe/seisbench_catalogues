@@ -1,9 +1,10 @@
 data:
-  starttime: 2024-03-01 00:00
-  endtime: 2024-03-01 06:00
+  starttime: 2024-01-04 03:00
+  endtime: 2024-01-04 05:00
   sds_path: /home/jheuel/data/SDS
-  stations: ../station_json/FORGE.json
+  stations: ../station_json/Rittershofen.json
   sampling_rate: 100
+  
 picking:
   P_threshold: 0.2
   S_threshold: 0.2
@@ -11,21 +12,42 @@ picking:
   blinding: [250, 250]
   overlap: 1500
   stacking: max  # max or avg
-  phasenet_model: diting
-  # phasenet_model: /home/jheuel/code/train_phasenet/models/induced_stead_real_noise.pth
+  # phasenet_model: original
+  phasenet_model: /home/jheuel/code/train_phasenet/models/induced_stead.pth
+  
 velocity_model:
   p_velocity: 5
   s_velocity: 2.9
   association_cutoff_distance: 100
   tolerance: 2.0
+  
 association:
+  # Paramaters for pyocto
+  # method: pyocto   
+  # zlim: [0, 30]
+  # n_picks: 14
+  # n_p_picks: 8 # Minumum required number P picks for an event.
+  # n_s_picks: 6 # Minumum required number S picks for an event.
+  # n_p_and_s_picks: 6  # Minumum required number of stations that have both P and S pick for an event.
+  # time_before: 5
+  
+  # Parameters for GaMMA
+  method: gamma
   zlim: [0, 30]
-  n_picks: 14
-  n_p_picks: 8 # Minumum required number P picks for an event.
-  n_s_picks: 6 # Minumum required number S picks for an event.
-  n_p_and_s_picks: 6  # Minumum required number of stations that have both P and S pick for an event.
-  time_before: 5
+  dbscan_eps: 10
+  dbscan_min_samples: 5
+  min_picks_per_eq: 8 
+  min_p_picks_per_eq: 6
+  min_s_picks_per_eq: 6 
+  max_sigma11: 2.0 
+  max_sigma22: 1.0
+  max_sigma12: 1.0
+  
+nonlinloc:
+  velocity_model: /home/jheuel/nextcloud/code/seisbench_catalogues/velocity_models/velocity.nll
+  nll_basepath: /home/jheuel/tmp/NLL
+  nll_executable: /work/software/nlloc/7.00.16/src/bin
 
 # General parameters
 nworkers: 4
-filename: "stead_example.xml"
+filename: "rittershofen.xml"
