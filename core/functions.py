@@ -519,7 +519,7 @@ def associate_gamma(picks, stations, ncpu=4, use_dbscan=True, use_amplitude=Fals
         # if catalog["gamma_score"][event_count] >= gamma_score_threshold:
         #     event_lst.append(ev)
 
-    return event_lst
+    return obspy.Catalog(event_lst)
 
 
 def pyocto_picks(seisbench_picks: list) -> dict:

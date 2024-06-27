@@ -107,7 +107,6 @@ def main(parfile):
             picks=picks,
             velocity_model=velocity_model,
             **parameters["association"])
-        print(f"Detected {len(catalog)} events after association. ")
     elif parameters["association"].get("method").lower() == "gamma":
         parameters["association"].pop("method")
         catalog = associate_gamma(
@@ -120,7 +119,9 @@ def main(parfile):
         )
     else:
         msg = f"Method {parameters['association']['method']} is not implemented."
-        raise ValueError(msg) 
+        raise ValueError(msg)
+
+    print(f"Detected {len(catalog)} events after association.")
     #######################################################################
 
     # Relocate earthquakes in catalog with NonLinLoc
