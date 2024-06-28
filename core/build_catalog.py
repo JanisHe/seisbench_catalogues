@@ -159,7 +159,7 @@ def main(parfile):
     # Relocate earthquakes in catalog with NonLinLoc
     # TODO: NLL package can used pre calculated travel times. Try to find pre calcualted travel times, instead
     #       of computing new. Especially worthful, when a accurate velocoty model is used
-    if parameters.get("nonlinloc"):
+    if parameters.get("nonlinloc") and len(catalog) > 0:
         catalog = nll_wrapper(catalog=catalog,
                               station_json=stations,
                               nll_basepath=parameters["nonlinloc"]["nll_basepath"],

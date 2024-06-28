@@ -338,8 +338,6 @@ def associate_pyocto(station_json: (str, pd.DataFrame), picks, velocity_model, *
         else:
             picks_dct.update({assignments["event_idx"][idx]: [pick]})
 
-    # TODO: Filter picks by logic operation, e.g. spick-time - p-picktime > 0
-
     # Create obspy catalog
     event_lst = []
     for index in events["idx"]:
@@ -493,7 +491,7 @@ def associate_gamma(picks,
         catalog.sort_values(by=["time"], inplace=True, ignore_index=True)
     else:
         msg = "Did not associate events"
-        raise Exception(msg)
+        return obspy.Catalog([])
 
     # Transform earthquake locations to lat long
     event_lat = []
