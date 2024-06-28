@@ -102,8 +102,8 @@ class Event2NLL:
             # f_conf.write("VGGRID 2 10000 7000 0.0 0.0 0.0 0.5 0.5 0.5 SLOW_LEN\n")  # XXX Probably this needs adjustment
             # Write velocity model
             for ind in range(len(self.df_vel_model)):
-                f_conf.write(f"LAYER {self.df_vel_model['depth'][ind]} {self.df_vel_model['vP'][ind]} 0 "
-                             f"{self.df_vel_model['vS'][ind]} 0 {self.df_vel_model['density'][ind]} 0\n")
+                f_conf.write(f"LAYER {self.df_vel_model['depth'][ind]} {self.df_vel_model['vp'][ind]} 0 "
+                             f"{self.df_vel_model['vs'][ind]} 0 {self.df_vel_model['density'][ind]} 0\n")
             f_conf.write("# END of Vel2Grid control file statements\n")
             # Write Grid2Time control statements
             f_conf.write("# Grid2Time control file statements\n")

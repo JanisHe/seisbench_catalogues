@@ -11,6 +11,7 @@ import pyocto
 import pandas as pd
 import numpy as np
 from pyproj import Proj
+from typing import Union
 
 from obspy.core.event.origin import Pick, Origin
 from obspy.core.event.event import Event
@@ -353,12 +354,26 @@ def associate_pyocto(station_json: (str, pd.DataFrame), picks, velocity_model, *
     return obspy.Catalog(event_lst)
 
 
-def associate_gamma(picks, stations, ncpu=4, use_dbscan=True, use_amplitude=False,
-                    zlim=(0, 30), p_vel=5.9, s_vel=3.5, method="BGMM",
-                    inital_points=[1, 1, 1], covariance_prior=(5, 5),
-                    oversample_factor=10, dbscan_eps=4, dbscan_min_samples=5,
-                    min_picks_per_eq=8, min_p_picks_per_eq=4,
-                    min_s_picks_per_eq=4, max_sigma11=2.0, max_sigma22=1.0,
+def associate_gamma(picks,
+                    stations,
+                    ncpu=4,
+                    use_dbscan=True,
+                    use_amplitude=False,
+                    zlim=(0, 30),
+                    p_vel: Union[float, None] = 5.0,
+                    s_vel: Union[float, None] = 2.9,
+                    eikonal: Union[dict, None] = None,
+                    method="BGMM",
+                    inital_points=[1, 1, 1],
+                    covariance_prior=(5, 5),
+                    oversample_factor=10,
+                    dbscan_eps=4,
+                    dbscan_min_samples=5,
+                    min_picks_per_eq=8,
+                    min_p_picks_per_eq=4,
+                    min_s_picks_per_eq=4,
+                    max_sigma11=2.0,
+                    max_sigma22=1.0,
                     max_sigma12=1.0):
     """
 
@@ -370,6 +385,7 @@ def associate_gamma(picks, stations, ncpu=4, use_dbscan=True, use_amplitude=Fals
     :param zlim:
     :param p_vel:
     :param s_vel:
+    :param eikonal:
     :param method:
     :param inital_points:
     :param covariance_prior:
@@ -422,10 +438,19 @@ def associate_gamma(picks, stations, ncpu=4, use_dbscan=True, use_amplitude=Fals
     config["use_dbscan"] = use_dbscan
     config["use_amplitude"] = use_amplitude
     config["z(km)"] = zlim
-    config["vel"] = {"p": p_vel, "s": s_vel}
     config["method"] = method
     config["initial_points"] = inital_points
     config["covariance_prior"] = covariance_prior
+
+    # Write velocity model to config
+    # If eikonal is defined, then eikonal is preferred
+    if p_vel and s_vel and not eikonal:
+        config["vel"] = {"p": p_vel, "s": s_vel}
+    elif eikonal:
+        config["eikonal"] = eikonal
+        config["eikonal"]["xlim"] = config["x(km)"]
+        config["eikonal"]["ylim"] = config["y(km)"]
+        config["eikonal"]["zlim"] = config["z(km)"]
 
     config["bfgs_bounds"] = (
                              (config["x(km)"][0] - 1, config["x(km)"][1] + 1),
@@ -505,12 +530,11 @@ def associate_gamma(picks, stations, ncpu=4, use_dbscan=True, use_amplitude=Fals
                         longitude=catalog["longitude"][event_count],
                         latitude=catalog["latitude"][event_count],
                         depth=catalog["z(km)"][event_count] * 1e3)
-        comment = Comment(text="EQTransformer for picking and GaMMA for association")
         gamma_score = Comment(text=f"gamma_score = {catalog['gamma_score'][event_count]}")
         ev = Event(picks=picks_lst,
                    force_resource_id=True,
                    origins=[origin],
-                   comments=[comment, gamma_score])
+                   comments=[gamma_score])
 
         # Append event to final event list
         event_lst.append(ev)
@@ -520,6 +544,15 @@ def associate_gamma(picks, stations, ncpu=4, use_dbscan=True, use_amplitude=Fals
         #     event_lst.append(ev)
 
     return obspy.Catalog(event_lst)
+
+
+def read_velocity_model(filename: str) -> pd.DataFrame:
+    """
+
+    :param filename:
+    :return:
+    """
+    return pd.read_csv(filename)
 
 
 def pyocto_picks(seisbench_picks: list) -> dict:

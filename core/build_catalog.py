@@ -15,7 +15,7 @@ import pandas as pd
 import seisbench.models as sbm
 
 from core.functions import (date_list, load_stations, daily_picks, associate_pyocto, count_picks,
-                            picks_per_station, get_tmp_picks, associate_gamma)
+                            picks_per_station, get_tmp_picks, associate_gamma, read_velocity_model)
 from core.utils import nll_wrapper
 
 
@@ -101,7 +101,21 @@ def main(parfile):
     #       use GaMMA1D.
     if parameters["association"].get("method").lower() == "pyocto":
         parameters["association"].pop("method")
-        velocity_model = pyocto.VelocityModel0D(**parameters["0Dvelocity_model"])
+        try:
+            if parameters["nonlinloc"].get("velocity_model"):
+                # Create velocity model for PyOcto
+                vel_model = read_velocity_model(filename=parameters["nonlinloc"]["velocity_model"])
+                vel_model_path = os.path.join(dirname,f'{pathlib.Path(parameters["filename"]).stem}.pyocto')
+                # TODO: Define xdist and zdist from lat lon in parameters
+                pyocto.VelocityModel1D.create_model(model=vel_model,
+                                                    delta=1.,
+                                                    xdist=30,
+                                                    zdist=20,
+                                                    path=vel_model_path)
+                velocity_model = pyocto.VelocityModel1D(path=vel_model_path,
+                                                        tolerance=2.0)
+        except KeyError:
+            velocity_model = pyocto.VelocityModel0D(**parameters["0D_velocity_model"])
 
         # Generate catalogue
         catalog = associate_pyocto(
@@ -111,12 +125,28 @@ def main(parfile):
             **parameters["association"])
     elif parameters["association"].get("method").lower() == "gamma":
         parameters["association"].pop("method")
+
+        # Define velocity model for eikonal solver in GaMMA
+        try:
+            if parameters["nonlinloc"].get("velocity_model"):
+                # Read velocity model
+                vel_model = read_velocity_model(filename=parameters["nonlinloc"]["velocity_model"])
+                eikonal = {"vel": {"p": vel_model["vp"].to_list(),
+                                   "s": vel_model["vs"].to_list(),
+                                   "z": vel_model["depth"].to_list()},
+                           "h": 1.0}
+
+        except KeyError:
+            eikonal = None
+
+        # Start association
         catalog = associate_gamma(
             picks=picks,
             stations=stations,
             ncpu=parameters["nworkers"],
-            p_vel=parameters["0Dvelocity_model"]["p_velocity"],
-            s_vel=parameters["0Dvelocity_model"]["s_velocity"],
+            p_vel=parameters["0D_velocity_model"]["p_velocity"],
+            s_vel=parameters["0D_velocity_model"]["s_velocity"],
+            eikonal=eikonal,
             **parameters["association"]
         )
     else:
