@@ -65,7 +65,7 @@ def main(parfile):
     #######################################################################
 
     # Start phase picking
-    joblib_pool = joblib.Parallel(n_jobs=parameters.get("nworkers"))
+    joblib_pool = joblib.Parallel(n_jobs=parameters.get("nworkers"), backend="threading")
     with tqdm.tqdm(total=len(stations["id"]) * len(dates)) as pbar:
         for station in stations["id"]:
             pbar.set_postfix_str(f"Picking phases at station {station}")   # Update progressbar
