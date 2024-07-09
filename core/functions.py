@@ -641,15 +641,6 @@ def get_tmp_picks(dirname):
         else:
             all_picks += picks.picks
 
-        # # Write all picks in one dataframe and one dataframe for each station
-        # if len(pick_df) > 0:
-        #     trace_id = pick_df["trace_id"][0]
-        #     if trace_id in picks_dict.keys():
-        #         picks_dict[trace_id] = pd.concat(objs=[pick_df, picks_dict[trace_id]],
-        #                                          ignore_index=True)
-        #     else:
-        #         picks_dict.update({trace_id: pick_df})
-
     return all_picks
 
 

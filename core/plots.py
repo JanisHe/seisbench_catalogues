@@ -15,6 +15,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import obspy
 
+from typing import Union
+
 from obspy.geodetics.base import locations2degrees, degrees2kilometers
 from core.functions import load_stations
 
@@ -267,7 +269,8 @@ def plot_event(event, client, station_json=None, ax=None, component=None, channe
         ax.set_title(title)
     else:
         ax.set_title(
-            f"{event.origins[0].time}\n{event.origins[0].latitude} | {event.origins[0].longitude}"
+            f"{event.origins[0].time}\n{event.origins[0].latitude} | {event.origins[0].longitude} | "
+            f"{np.round(event.origins[0].depth / 1e3, 2)} km"
         )
 
     # Set up y-label
@@ -348,19 +351,33 @@ def plot_from_data_dict(data_dict: dict, result_dir: str, ax=None, pick_residual
 def plot_all_traces_with_picks(result_dir: str, client, ax=None,
                                component=None, channel=None,
                                filter_args: (None, dict) = {"type": "bandpass", "freqmin": 1, "freqmax": 45},
-                               norm: float = 0.45):
+                               norm: float = 0.45,
+                               starttime: Union[obspy.UTCDateTime, str, None] = None,
+                               endtime: Union[obspy.UTCDateTime, str, None] = None):
+
+    if isinstance(starttime, str):
+        starttime = obspy.UTCDateTime(starttime)
+
+    if isinstance(endtime, str):
+        endtime = obspy.UTCDateTime(endtime)
 
     labels = []
     plot_position = 0
 
+    showfig = False
     if not ax:
         fig = plt.figure(figsize=(9, 11))
         ax = fig.add_subplot(111)
+        showfig = True
 
     # Read start- and endtime from yml file
     yml_file = glob.glob(os.path.join(result_dir, "*.yml"))[0]
     with open(yml_file, "r") as f:
         parameters = yaml.safe_load(f)
+
+    if starttime and endtime:
+        parameters["data"]["starttime"] = starttime
+        parameters["data"]["endtime"] = endtime
 
     if obspy.UTCDateTime(parameters["data"]["endtime"]) - obspy.UTCDateTime(parameters["data"]["starttime"]) > 86400:
         msg = "Files are too long"
@@ -383,11 +400,25 @@ def plot_all_traces_with_picks(result_dir: str, client, ax=None,
             endtime=obspy.UTCDateTime(parameters["data"]["endtime"])
         )
 
+        # Read starttime for labeling
+        if len(stream) > 0:
+            starttime_str = stream[0].stats.starttime.strftime('%Y %m %d')
+
         # Read picks
         try:
             pick_df = pd.read_csv(os.path.join(result_dir, "picks", f"{station}.csv"))
+            # Convert pick peak times to UTCDateTime
+            peak_times = pick_df["peak_time"].to_list()
+            for index in range(len(peak_times)):
+                peak_times[index] = obspy.UTCDateTime(peak_times[index])
+            pick_df["peak_time"] = peak_times
         except FileNotFoundError:
             pick_df = None
+
+        # Filter picks between start- and endtime
+        if starttime and endtime and pick_df is not None:
+            pick_df = pick_df.loc[pick_df['peak_time'] >= starttime]
+            pick_df = pick_df.loc[pick_df['peak_time'] <= endtime]
 
         if component or channel:
             stream = stream.select(component=component, channel=channel)
@@ -423,7 +454,7 @@ def plot_all_traces_with_picks(result_dir: str, client, ax=None,
 
             # Plot all picks in picks_df
             if pick_df is not None:
-                for index in range(len(pick_df)):
+                for index in pick_df.index.to_list():
                     color = "r" if pick_df["phase"][index] == "P" else "b"
                     plot_picks(
                         time=obspy.UTCDateTime(pick_df["peak_time"][index]).datetime,
@@ -441,8 +472,10 @@ def plot_all_traces_with_picks(result_dir: str, client, ax=None,
     ax.set_yticks([])
     ax.set_yticks(ticks=np.arange(0, len(labels)))
     ax.set_yticklabels(labels)
+    ax.set_xlabel(f"Time (UTC) on {starttime_str}")
 
-
+    if showfig is True:
+        plt.show()
 
 
 
@@ -453,30 +486,40 @@ if __name__ == "__main__":
     from functions import compare_catalogs
 
     client = Client("/home/jheuel/data/SDS")
+    # client = Client("/data_scc/KABBA_archive_SDS")
 
-    # dirname = "/home/jheuel/nextcloud/code/seisbench_catalogues/results/forge_catalog_induced_stead_real_noise"
-    # catalog = obspy.read_events(glob.glob(os.path.join(dirname, "*.xml"))[0])
-    # station_json = glob.glob(os.path.join(dirname, "*.json"))[0]
+    dirname = "/home/jheuel/code/seisbench_catalogues/results/rittershofen_jan2024"
+    catalog = obspy.read_events(glob.glob(os.path.join(dirname, "*.xml"))[0])
+    station_json = glob.glob(os.path.join(dirname, "*.json"))[0]
 
-    catalog = obspy.read_events("/home/jheuel/code/seisbench_catalogues/results/forge_catalog_diting/forge_catalog_diting.xml")
-    station_json = "../station_json/FORGE.json"
-    catalog2 = obspy.read_events("/home/jheuel/code/seisbench_catalogues/results/forge_catalog_induced_stead/forge_catalog_induced_stead.xml")
-    events1, events2 = compare_catalogs(catalog, catalog2, verbose=True)
+    # dirname_stead = "/home/jheuel/code/seisbench_catalogues/results/rittershofen_stead"
+
+    plot_all_traces_with_picks(dirname, client,
+                               starttime=obspy.UTCDateTime("20240128 02:45"),
+                               endtime=obspy.UTCDateTime("20240128 02:55"))
+    for event in catalog.events:
+        fig = plot_event(event=event, client=client, station_json=station_json, with_distance=False)
+        plt.show()
+
+    # catalog = obspy.read_events("/home/jheuel/code/seisbench_catalogues/results/forge_catalog_diting/forge_catalog_diting.xml")
+    # station_json = "../station_json/FORGE.json"
+    # catalog2 = obspy.read_events("/home/jheuel/code/seisbench_catalogues/results/forge_catalog_induced_stead/forge_catalog_induced_stead.xml")
+    # events1, events2 = compare_catalogs(catalog, catalog2, verbose=True)
 
     # events = catalog.events[::-1]
     # random.shuffle(events)
 
-    for event in events2:
-        fig = plt.figure(figsize=(15, 11))
-        ax1 = fig.add_subplot(121)
-        ax2 = fig.add_subplot(122, sharex=ax1, sharey=ax1)
-        data_dict = plot_event(event=event, client=client, station_json=station_json, component="Z",
-                               with_distance=True, ax=ax2, title="Induced STEAD")
-        plot_from_data_dict(data_dict=data_dict,
-                            result_dir="/home/jheuel/nextcloud/code/seisbench_catalogues/results/forge_catalog_diting",
-                            ax=ax1, pick_residual=0.5, title="Diting", plot_all_picks=True)
-        plt.tight_layout()
-        plt.show()
+    # for event in events2:
+    #     fig = plt.figure(figsize=(15, 11))
+    #     ax1 = fig.add_subplot(121)
+    #     ax2 = fig.add_subplot(122, sharex=ax1, sharey=ax1)
+    #     data_dict = plot_event(event=event, client=client, station_json=station_json, component="Z",
+    #                            with_distance=True, ax=ax2, title="Induced STEAD")
+    #     plot_from_data_dict(data_dict=data_dict,
+    #                         result_dir="/home/jheuel/nextcloud/code/seisbench_catalogues/results/forge_catalog_diting",
+    #                         ax=ax1, pick_residual=0.5, title="Diting", plot_all_picks=True)
+    #     plt.tight_layout()
+    #     plt.show()
 
     # dirs = glob.glob("/home/jheuel/nextcloud/code/seisbench_catalogues/results/steadbasis*")
     # fig = plt.figure()
