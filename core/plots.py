@@ -4,8 +4,6 @@ Collection of functions to plot catalogs created with methods in this project
 
 import glob
 import os
-import pathlib
-import shutil
 import datetime
 import yaml
 import tqdm
