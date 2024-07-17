@@ -136,6 +136,10 @@ def main(parfile):
                                    "z": vel_model["depth"].to_list()},
                            "h": 1.0}
 
+                # Update OD_velocity_model in parameters
+                parameters["0D_velocity_model"] = {"p_velocity": None,
+                                                   "s_velocity": None}
+
         except KeyError:
             eikonal = None
 
