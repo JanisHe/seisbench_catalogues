@@ -105,7 +105,7 @@ def main(parfile):
             if parameters["nonlinloc"].get("velocity_model"):
                 # Create velocity model for PyOcto
                 vel_model = read_velocity_model(filename=parameters["nonlinloc"]["velocity_model"])
-                vel_model_path = os.path.join(dirname,f'{pathlib.Path(parameters["filename"]).stem}.pyocto')
+                vel_model_path = os.path.join(dirname, f'{pathlib.Path(parameters["filename"]).stem}.pyocto')
                 # TODO: Define xdist and zdist from lat lon in parameters
                 pyocto.VelocityModel1D.create_model(model=vel_model,
                                                     delta=1.,
@@ -144,8 +144,8 @@ def main(parfile):
             picks=picks,
             stations=stations,
             ncpu=parameters["nworkers"],
-            p_vel=parameters["0D_velocity_model"]["p_velocity"],
-            s_vel=parameters["0D_velocity_model"]["s_velocity"],
+            p_vel=parameters.get("0D_velocity_model").get("p_velocity"),
+            s_vel=parameters.get("0D_velocity_model").get("s_velocity"),
             eikonal=eikonal,
             **parameters["association"]
         )
@@ -165,6 +165,7 @@ def main(parfile):
                               nll_basepath=parameters["nonlinloc"]["nll_basepath"],
                               vel_model=parameters["nonlinloc"]["velocity_model"])
 
+    # TODO: Add filtering methods (see Notizbuch fuer Paper)
     # Assign associated events to final catalog and create output files
     # Save picks as pickle and catalog as xmlin separate directory
     catalog_filename = os.path.join(dirname, parameters["filename"])
