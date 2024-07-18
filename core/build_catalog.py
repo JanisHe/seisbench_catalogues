@@ -42,7 +42,8 @@ def main(parfile):
         pn_model = torch.load(parameters["picking"].pop("phasenet_model"),
                               map_location=torch.device('cpu'))
     else:
-        pn_model = sbm.PhaseNet.from_pretrained(parameters["picking"].pop("phasenet_model"))
+        pn_model = sbm.PhaseNet.from_pretrained(parameters["picking"].pop("phasenet_model"),
+                                                update=True)
 
     # Load stations
     stations = load_stations(station_json=parameters["data"]["stations"])
