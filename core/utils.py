@@ -3,7 +3,7 @@ import json
 import obspy
 
 from core.functions import sort_events
-from nll_functions import Event2NLL, update_events_from_nll
+from nll_functions import Event2NLL, update_events_from_nll, check_nll_time
 
 
 def station_json_from_inventory(inventory, station_json="../station_json/stations.json"):
@@ -25,12 +25,27 @@ def nll_wrapper(catalog: obspy.Catalog,
     :return:
     """
     # Run NonLinLoc
+    # Check files in NLL basepath directory
+    nll_time_files_exist = check_nll_time(station_json=station_json,
+                                          nll_basepath=nll_basepath)
+    if nll_time_files_exist is True:
+        create_nll_files = False
+    else:
+        create_nll_files = True
+
     nll = Event2NLL(catalog=catalog,
                     nll_basepath=nll_basepath,
                     vel_model=vel_model,
                     stations_json=station_json,
-                    nll_executable=nll_executable)
-    nll.run_nll()  #delete_dirs=["time", "model"])
+                    nll_executable=nll_executable,
+                    create_files=create_nll_files)
+
+    # TODO: Da create_dirs True ist, wird time neu erzeugt
+    if nll_time_files_exist is True:
+        nll.create_obs()
+        nll.localise()
+    else:
+        nll.run_nll()
 
     # Update each localisation of each event
     # Catalog is also filtered with depth uncertainty

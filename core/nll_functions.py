@@ -213,3 +213,31 @@ def update_events_from_nll(station_json, nll_basepath, depth_filter=10000):
             pick.waveform_id.location_code = location
 
     return event_lst
+
+
+def check_nll_time(station_json: str,
+                   nll_basepath: str):
+    """
+    Check whether for each station all required files in time directory exist.
+    If all files exist, function returns True, otherwise False
+    :param station_json:
+    :param nll_basepath:
+    :return:
+    """
+    if isinstance(station_json, pd.DataFrame):
+        df_stations = station_json
+    else:
+        df_stations = load_stations(station_json=station_json)
+
+    for station_id in df_stations["id"]:
+        name = station_id.split(".")[1]
+        for phase in ["P", "S"]:
+            for ftype in ["angle.buf", "angle.hdr", "time.buf", "time.hdr"]:
+                try:
+                    filename = glob.glob(os.path.join(nll_basepath, "time", f"*{phase}.{name}.{ftype}"))[0]
+                except IndexError:
+                    return False
+                if os.path.isfile(filename) is False:
+                    return False
+
+    return True
