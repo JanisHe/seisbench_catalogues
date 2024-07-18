@@ -2,6 +2,8 @@ import os
 import glob
 import json
 import pathlib
+import warnings
+
 import tqdm
 import pickle
 import datetime
@@ -15,7 +17,7 @@ from typing import Union
 
 from obspy.core.event.origin import Pick, Origin
 from obspy.core.event.event import Event
-from obspy.core.event.base import WaveformStreamID, Comment
+from obspy.core.event.base import WaveformStreamID, Comment, QuantityError
 from gamma.utils import association
 
 
@@ -331,7 +333,11 @@ def associate_pyocto(station_json: (str, pd.DataFrame), picks, velocity_model, *
                                        location_code=assignments["station"][idx].split(".")[2])
         pick = Pick(time=obspy.UTCDateTime(assignments["time"][idx]),
                     waveform_id=waveform_id,
-                    phase_hint=assignments["phase"][idx])
+                    phase_hint=assignments["phase"][idx],
+                    time_erros=QuantityError()
+                    )
+        pick.time_errors["uncertainty"] = (picks[assignments["pick_idx"][idx]].end_time -
+                                           picks[assignments["pick_idx"][idx]].start_time)
 
         if assignments["event_idx"][idx] in picks_dct.keys():
             picks_dct[assignments["event_idx"][idx]].append(pick)
@@ -491,6 +497,7 @@ def associate_gamma(picks,
         catalog.sort_values(by=["time"], inplace=True, ignore_index=True)
     else:
         msg = "Did not associate events"
+        warnings.warn(msg)
         return obspy.Catalog([])
 
     # Transform earthquake locations to lat long
@@ -521,7 +528,9 @@ def associate_gamma(picks,
             pick = Pick(time=obspy.UTCDateTime(p["timestamp"]),
                         waveform_id=waveform_id,
                         phase_hint=p["type"].upper(),
+                        time_errors=QuantityError(),
                         comments=[comments])
+            pick.time_errors["uncertainty"] = p["end_time"] - p["start_time"]
             picks_lst.append(pick)
 
         origin = Origin(time=catalog["time"][event_count],
@@ -601,7 +610,9 @@ def gamma_picks(seisbench_picks: list) -> pd.DataFrame:
             "id": pick.trace_id,
             "timestamp": obspy.UTCDateTime(pick.peak_time).datetime,
             "prob": pick.peak_value,
-            "type": pick.phase.lower()
+            "type": pick.phase.lower(),
+            "start_time": pick.start_time,
+            "end_time": pick.end_time
         })
 
     return pd.DataFrame(picks)

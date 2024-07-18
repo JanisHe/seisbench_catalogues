@@ -53,15 +53,18 @@ class Event2NLL:
         Creates obs file for NLL.
         One file that contains all observations
         """
-        s = "{:<5} ? {:<3} ? {:<3} ? {:>25} GAU 0.5 -1 -1 -1 1\n"
+        s = "{:<5} ? {:<3} ? {:<3} ? {:>25} GAU {:>6} -1 -1 -1 1\n"
         # Create one obs file that contains all events
         with open(os.path.join(self.nll_basepath, "obs", "events.obs"), "w") as f_obs:
             for event in self.catalog.events:
                 f_obs.write(f"# Origin time: {event.origins[0].time}\n")
                 for pick in event.picks:
                     datetime_str = pick.time.datetime.strftime("%Y%m%d %H%M %S.%f")
-                    f_obs.write(s.format(pick.waveform_id.station_code, "Z", pick.phase_hint.upper(),
-                                         datetime_str))
+                    f_obs.write(s.format(pick.waveform_id.station_code,
+                                         "Z",
+                                         pick.phase_hint.upper(),
+                                         datetime_str,
+                                         pick.time_errors.uncertainty))
                 f_obs.write("\n\n")
 
     def create_config(self, gtfile="P",
