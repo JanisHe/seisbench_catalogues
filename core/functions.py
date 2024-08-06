@@ -18,6 +18,7 @@ from typing import Union
 from obspy.core.event.origin import Pick, Origin
 from obspy.core.event.event import Event
 from obspy.core.event.base import WaveformStreamID, Comment, QuantityError
+from obspy.geodetics.base import locations2degrees, degrees2kilometers
 from gamma.utils import association
 
 
@@ -279,6 +280,127 @@ def count_picks(picks: list) -> dict:
         counts["TOTAL"][phase] += 1
 
     return counts
+
+
+def event_picks(event):
+    """
+
+    :param event:
+    :return:
+    """
+    picks = {}
+    for pick in event.picks:
+        id = f"{pick.waveform_id.network_code}.{pick.waveform_id.station_code}.{pick.waveform_id.location_code}"
+        if id in picks.keys():
+            picks[id].update({pick["phase_hint"]: pick["time"]})
+        else:
+            picks.update({id: {pick["phase_hint"]: pick["time"]}})
+
+    return picks
+
+
+def add_distances(picks: dict, stations: (str, pd.DataFrame),
+                  event: obspy.core.event.event.Event,
+                  hypocentral_distance: bool = True):
+    """
+
+    :param picks:
+    :param stations:
+    :param event:
+    :param hypocentral_distance
+    :return:
+    """
+    if isinstance(stations, str):
+        stations = load_stations(station_json=stations)
+
+    for key in picks:
+        try:
+            dataframe_index = list(stations["id"]).index(key)
+        except ValueError:
+            continue
+
+        distance = locations2degrees(lat1=event.origins[0].latitude,
+                                     long1=event.origins[0].longitude,
+                                     lat2=stations["latitude"][dataframe_index],
+                                     long2=stations["longitude"][dataframe_index])
+
+        # Convert from degree to km
+        distance = degrees2kilometers(degrees=distance)
+
+        # Estimate hypocentral distance, otherwise it is epicentral distance
+        if hypocentral_distance is True:
+            distance = np.sqrt(event.origins[0].depth / 1e3 ** 2 + distance ** 2)
+
+        # Add distance to pick dictionary
+        picks[key].update({"distance_km": distance})
+
+    # Sort picks with respect to distance
+    try:
+        picks = dict(sorted(picks.items(), key=lambda item: item[1]["distance_km"]))
+    except KeyError:
+        msg = "Did not assign distances to picks."
+        warnings.warn(msg)
+
+    return picks
+
+
+def association_score(event, client, station_json, cutoff_radius=10):
+    """
+    Association score as described in Park et al., 2022: Basement fault activation before larger earthquakes in
+    Oklahoma and Kansas.
+
+    :param event:
+    :param client:
+    :param station_json:
+    :param cutoff_radius:
+    :return:
+    """
+    # Load station_json
+    # TODO: Make copy of stations???
+    if isinstance(station_json, str):
+        stations = load_stations(station_json=station_json)
+    elif isinstance(station_json, pd.DataFrame):
+        stations = station_json
+
+    # Get dictionary of picks and add distance
+    picks = event_picks(event=event)
+
+    # Obtain distance between localisation and each station
+    distances_km = [degrees2kilometers(degrees=locations2degrees(
+        lat1=event.origins[0].latitude,
+        long1=event.origins[0].longitude,
+        lat2=stations["latitude"][index],
+        long2=stations["longitude"][index])) for index in range(len(stations))]
+    weights = [np.min([1 / distance, 1 / cutoff_radius]) for distance in distances_km]
+    stations = stations.assign(distance_km=distances_km)
+    stations = stations.assign(weights=weights)
+
+    # Add picks to stations dataframe
+    stations = stations.assign(P_weights=[float(0)] * len(stations))
+    stations = stations.assign(S_weights=[float(0)] * len(stations))
+    for station, pick in picks.items():
+        index = stations[stations["id"] == station].index.values[0]
+        for phase, time in pick.items():
+            stations.loc[index, f"{phase}_weights"] = stations.loc[index, "weights"]
+
+    # Check whether data are available for each station
+    for index, id in enumerate(stations["id"]):
+        network, station, location = id.split(".")
+        stream = client.get_waveforms(network=network,
+                                      station=station,
+                                      location=location,
+                                      channel="*",
+                                      starttime=event.origins[0].time - 10,
+                                      endtime=event.origins[0].time + 30)
+
+        # Remove row from station dataframe if now data are available
+        if len(stream) == 0:
+            stations = stations.drop(index)
+
+    # Determine association score
+    score = 1 / (2 * np.sum(stations["weights"])) * (np.sum(stations["P_weights"]) + np.sum(stations["S_weights"]))
+
+    return score
 
 
 def associate_pyocto(station_json: (str, pd.DataFrame), picks, velocity_model, **kwargs):
