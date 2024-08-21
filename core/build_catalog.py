@@ -1,8 +1,10 @@
 import os
+import glob
 import sys
 import pickle
 
 import obspy
+import pandas as pd
 import yaml
 import joblib
 import torch
@@ -11,12 +13,69 @@ import pathlib
 import shutil
 import tqdm
 
-import pandas as pd
 import seisbench.models as sbm
+from joblib.testing import param
 
 from core.functions import (date_list, load_stations, daily_picks, associate_pyocto, count_picks,
                             picks_per_station, get_tmp_picks, associate_gamma, read_velocity_model)
-from core.utils import nll_wrapper
+from core.utils import nll_wrapper, merge_catalogs
+
+
+def daily_catalog(julday: int,
+                  year: int,
+                  stations: pd.DataFrame,
+                  channel_code: str,
+                  seisbench_model,
+                  assocoation_method: str = "pyocto",
+                  sampling_rate: (None, float) = None,
+                  pathname: str = "tmp_picks",
+                  **parameters
+                  ):
+
+    # Loop over each station
+    for station in stations["id"]:
+        print(station)
+        # Picking
+        daily_picks(
+            julday=julday,
+            year=year,
+            starttime=obspy.UTCDateTime(parameters["data"]["starttime"]),
+            endtime=obspy.UTCDateTime(parameters["data"]["endtime"]),
+            sds_path=parameters["data"]["sds_path"],
+            network=station.split(".")[0],
+            station=station.split(".")[1],
+            channel_code=channel_code,
+            seisbench_model=seisbench_model,
+            output_format=assocoation_method,
+            sampling_rate=sampling_rate,
+            pathname=pathname,
+            **parameters["picking"]
+        )
+
+    # Collect picks for single day
+    picks = get_tmp_picks(dirname=pathname,
+                          julday=julday)
+
+    # Association stuff
+    if assocoation_method.lower() == "pyocto":
+        catalog = associate_pyocto(
+            station_json=stations,
+            picks=picks,
+            **parameters["association"])
+    elif assocoation_method.lower() == "gamma":
+        catalog = associate_gamma(
+            picks=picks,
+            stations=stations,
+            ncpu=parameters["nworkers"],
+            p_vel=None,
+            s_vel=None,
+            **parameters["association"]
+        )
+
+    # Save catalog in tmp_dir
+    if len(catalog) > 0:
+        catalog.write(filename=os.path.join(pathname, f"{year}_{julday}.xml"),
+                      format="QUAKEML")
 
 
 def main(parfile):
@@ -63,104 +122,66 @@ def main(parfile):
     if os.path.isdir(tmp_pick_dirname):
         shutil.rmtree(tmp_pick_dirname)
     os.makedirs(tmp_pick_dirname)
+
+    # Set up velocity model
+    association_method = parameters["association"].pop("method")
+    if parameters["nonlinloc"].get("velocity_model"):
+        vel_model = read_velocity_model(filename=parameters["nonlinloc"]["velocity_model"])
+        # Create velocity model either for GaMMA or PyOcto
+        if association_method.lower() == "pyocto":
+            vel_model_path = os.path.join(dirname,
+                                          f'{pathlib.Path(parameters["filename"]).stem}.pyocto')
+            # TODO: Define xdist and zdist from lat lon in parameters
+            #       Decrease delta for a more accurate initial localisation
+            pyocto.VelocityModel1D.create_model(model=vel_model,
+                                                delta=1.,
+                                                xdist=30,
+                                                zdist=20,
+                                                path=vel_model_path)
+            velocity_model = pyocto.VelocityModel1D(path=vel_model_path,
+                                                    tolerance=2.0)
+            parameters["association"]["velocity_model"] = velocity_model
+        elif association_method.lower() == "gamma":
+            eikonal = {"vel": {"p": vel_model["vp"].to_list(),
+                               "s": vel_model["vs"].to_list(),
+                               "z": vel_model["depth"].to_list()},
+                       "h": 1.0}
+            parameters["association"]["eikonal"] = eikonal
+        else:
+            msg = f"Method {parameters['association']['method']} is not implemented."
+            raise ValueError(msg)
+
+
     #######################################################################
 
-    # Start phase picking
-    joblib_pool = joblib.Parallel(n_jobs=parameters.get("nworkers"), backend="threading")
-    with tqdm.tqdm(total=len(stations["id"]) * len(dates)) as pbar:
-        for station in stations["id"]:
-            pbar.set_postfix_str(f"Picking phases at station {station}")   # Update progressbar
+    # TODO: Since processes can be doubled be careful with number of workers for association
+    # Define joblib pool for multiprocessing
+    joblib_pool = joblib.Parallel(n_jobs=parameters.get("nworkers"),
+                                  backend="threading")
 
-            # Start parallel picking over days for each station
-            joblib_pool(
-                joblib.delayed(daily_picks)(
-                    julday=date[1],
-                    year=date[0],
-                    starttime=obspy.UTCDateTime(parameters["data"]["starttime"]),
-                    endtime=obspy.UTCDateTime(parameters["data"]["endtime"]),
-                    sds_path=parameters["data"]["sds_path"],
-                    network=station.split(".")[0],
-                    station=station.split(".")[1],
-                    channel_code="*",
-                    seisbench_model=pn_model,
-                    output_format="pyocto",
-                    sampling_rate=sampling_rate,
-                    pathname=tmp_pick_dirname, **parameters["picking"]
-                )
-                for date in dates)
-            pbar.update(len(dates))
-
-    # Collect all picks from temporary saved picks
-    picks = get_tmp_picks(dirname=tmp_pick_dirname)
-
-    # Convert picks of each station to single dataframe
-    picks_station = picks_per_station(seisbench_picks=picks)
-    #######################################################################
-
-    # Association
-    # TODO: If nonlinloc in parameters, load velocity model and define 1D velocity model for PyOcto and
-    #       use GaMMA1D.
-    if parameters["association"].get("method").lower() == "pyocto":
-        parameters["association"].pop("method")
-        try:
-            if parameters["nonlinloc"].get("velocity_model"):
-                # Create velocity model for PyOcto
-                vel_model = read_velocity_model(filename=parameters["nonlinloc"]["velocity_model"])
-                vel_model_path = os.path.join(dirname, f'{pathlib.Path(parameters["filename"]).stem}.pyocto')
-                # TODO: Define xdist and zdist from lat lon in parameters
-                pyocto.VelocityModel1D.create_model(model=vel_model,
-                                                    delta=1.,
-                                                    xdist=30,
-                                                    zdist=20,
-                                                    path=vel_model_path)
-                velocity_model = pyocto.VelocityModel1D(path=vel_model_path,
-                                                        tolerance=2.0)
-        except KeyError:
-            velocity_model = pyocto.VelocityModel0D(**parameters["0D_velocity_model"])
-
-        # Generate catalogue
-        catalog = associate_pyocto(
-            station_json=stations,
-            picks=picks,
-            velocity_model=velocity_model,
-            **parameters["association"])
-    elif parameters["association"].get("method").lower() == "gamma":
-        parameters["association"].pop("method")
-
-        # Define velocity model for eikonal solver in GaMMA
-        try:
-            if parameters["nonlinloc"].get("velocity_model"):
-                # Read velocity model
-                vel_model = read_velocity_model(filename=parameters["nonlinloc"]["velocity_model"])
-                eikonal = {"vel": {"p": vel_model["vp"].to_list(),
-                                   "s": vel_model["vs"].to_list(),
-                                   "z": vel_model["depth"].to_list()},
-                           "h": 1.0}
-
-                # Update OD_velocity_model in parameters
-                parameters["0D_velocity_model"] = {"p_velocity": None,
-                                                   "s_velocity": None}
-
-        except KeyError:
-            eikonal = None
-
-        # Start association
-        catalog = associate_gamma(
-            picks=picks,
+    # Loop over each date in dates with joblib
+    joblib_pool(
+        joblib.delayed(daily_catalog)
+        (
+            julday=date[1],
+            year=date[0],
             stations=stations,
-            ncpu=parameters["nworkers"],
-            p_vel=parameters.get("0D_velocity_model").get("p_velocity"),
-            s_vel=parameters.get("0D_velocity_model").get("s_velocity"),
-            eikonal=eikonal,
-            **parameters["association"]
+            channel_code="*",
+            dirname=dirname,
+            sampling_rate=sampling_rate,
+            pathname=tmp_pick_dirname,
+            seisbench_model=pn_model,
+            **parameters
         )
-    else:
-        msg = f"Method {parameters['association']['method']} is not implemented."
-        raise ValueError(msg)
+        for date in dates
+    )
 
+    # Merge daily catalogs
+    catalogs = glob.glob(os.path.join(tmp_pick_dirname, "*.xml"))
+    catalog = merge_catalogs(catalogs=catalogs)
     print(f"\nDetected {len(catalog)} events after association.\n")
-    #######################################################################
 
+    # Run NLL
     # Relocate earthquakes in catalog with NonLinLoc
     # TODO: NLL package can used pre calculated travel times. Try to find pre calcualted travel times, instead
     #       of computing new. Especially worthful, when a accurate velocoty model is used
@@ -170,7 +191,11 @@ def main(parfile):
                               nll_basepath=parameters["nonlinloc"]["nll_basepath"],
                               vel_model=parameters["nonlinloc"]["velocity_model"])
 
-    # TODO: Add filtering methods (see Notizbuch fuer Paper)
+
+    # Collect all picks from temporary saved picks and convert picks of each station to single dataframe
+    picks = get_tmp_picks(dirname=tmp_pick_dirname)
+    picks_station = picks_per_station(seisbench_picks=picks)
+
     # Assign associated events to final catalog and create output files
     # Save picks as pickle and catalog as xmlin separate directory
     catalog_filename = os.path.join(dirname, parameters["filename"])

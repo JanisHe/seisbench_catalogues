@@ -151,13 +151,22 @@ def picking(seisbench_model, stream: obspy.Stream, batch_size: int = 512, P_thre
         return picks
 
 
-def daily_picks(julday: int, year: int, starttime: obspy.UTCDateTime,
-                endtime: obspy.UTCDateTime, sds_path: str,
-                station: str, network: str, channel_code: str,
-                seisbench_model, batch_size: int = 512, P_threshold: float = 0.1,
-                S_threshold: float = 0.1, output_format: str = "pyocto",
+def daily_picks(julday: int,
+                year: int,
+                starttime: obspy.UTCDateTime,
+                endtime: obspy.UTCDateTime,
+                sds_path: str,
+                station: str,
+                network: str,
+                channel_code: str,
+                seisbench_model,
+                batch_size: int = 512,
+                P_threshold: float = 0.1,
+                S_threshold: float = 0.1,
+                output_format: str = "pyocto",
                 sampling_rate: (None, float) = None,
-                pathname: str = "tmp_picks", **kwargs):
+                pathname: str = "tmp_picks",
+                **kwargs):
     """
 
     :param julday:
@@ -757,14 +766,16 @@ def picks_per_station(seisbench_picks: list,
         raise ValueError(msg)
 
 
-def get_tmp_picks(dirname):
+def get_tmp_picks(dirname, julday=None):
     """
 
     :param dirname:
     :return:
     """
-    files = glob.glob(os.path.join(dirname, "*.pick"))
-    picks_dict = {}
+    if julday:
+        files = glob.glob(os.path.join(dirname, f"*{julday}.pick"))
+    else:
+        files = glob.glob(os.path.join(dirname, "*.pick"))
     for index, filename in enumerate(files):
         with open(filename, "rb") as handle:
             picks = pickle.load(handle)

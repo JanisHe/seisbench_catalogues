@@ -5,6 +5,8 @@ Collection of functions to plot catalogs created with methods in this project
 import glob
 import os
 import datetime
+import warnings
+
 import yaml
 import tqdm
 
@@ -15,66 +17,7 @@ import obspy
 
 from typing import Union
 
-from obspy.geodetics.base import locations2degrees, degrees2kilometers
-from core.functions import load_stations
-
-
-def event_picks(event):
-    """
-
-    :param event:
-    :return:
-    """
-    picks = {}
-    for pick in event.picks:
-        id = f"{pick.waveform_id.network_code}.{pick.waveform_id.station_code}.{pick.waveform_id.location_code}"
-        if id in picks.keys():
-            picks[id].update({pick["phase_hint"]: pick["time"]})
-        else:
-            picks.update({id: {pick["phase_hint"]: pick["time"]}})
-
-    return picks
-
-
-def add_distances(picks: dict, stations: (str, pd.DataFrame),
-                  event: obspy.core.event.event.Event,
-                  hypocentral_distance: bool = True):
-    """
-
-    :param picks:
-    :param stations:
-    :param event:
-    :param hypocentral_distance
-    :return:
-    """
-    if isinstance(stations, str):
-        stations = load_stations(station_json=stations)
-
-    for key in picks:
-        try:
-            dataframe_index = list(stations["id"]).index(key)
-        except ValueError:
-            continue
-
-        distance = locations2degrees(lat1=event.origins[0].latitude,
-                                     long1=event.origins[0].longitude,
-                                     lat2=stations["latitude"][dataframe_index],
-                                     long2=stations["longitude"][dataframe_index])
-
-        # Convert from degree to km
-        distance = degrees2kilometers(degrees=distance)
-
-        # Estimate hypocentral distance, otherwise it is epicentral distance
-        if hypocentral_distance is True:
-            distance = np.sqrt(event.origins[0].depth / 1e3 ** 2 + distance ** 2)
-
-        # Add distance to pick dictionary
-        picks[key].update({"distance_km": distance})
-
-    # Sort picks with respect to distance
-    picks = dict(sorted(picks.items(), key=lambda item: item[1]["distance_km"]))
-
-    return picks
+from core.functions import load_stations, event_picks, add_distances
 
 
 def start_endtime(picks: dict, time_before: float = 15, time_after: float = 25):
@@ -91,6 +34,10 @@ def start_endtime(picks: dict, time_before: float = 15, time_after: float = 25):
 
     starttime = starttime - time_before
     endtime = endtime + time_after
+
+    # Last check if starttime is after endtime (happens e.g. when only S phases in picks)
+    if starttime > endtime:
+        starttime = endtime - time_after - time_before
 
     return starttime, endtime
 
@@ -116,7 +63,7 @@ def find_pick(dataframe, datetime, pick_resiudal=0.5):
 
 def plot_event(event, client, station_json=None, ax=None, component=None, channel=None,
                with_distance=True, plot_all_picks: bool = False, result_dir: (None, str) = None,
-               filter_args: (None, dict) = {"type": "bandpass", "freqmin": 1, "freqmax": 45},
+               filter_args: (None, dict) = {"type": "bandpass", "freqmin": 1, "freqmax": 10},
                norm: float = 0.45, title: (None, str) = None):
 
     # If not station_json, then plot streams with difference between source time and p-pick time
@@ -481,22 +428,27 @@ def plot_all_traces_with_picks(result_dir: str, client, ax=None,
 if __name__ == "__main__":
     from obspy.clients.filesystem.sds import Client
     import random
-    from functions import compare_catalogs
+    from functions import compare_catalogs, association_score
 
     client = Client("/home/jheuel/data/SDS")
     # client = Client("/data_scc/KABBA_archive_SDS")
 
-    dirname = "/home/jheuel/code/seisbench_catalogues/results/rittershofen_jan2024"
+    dirname = "/home/jheuel/code/seisbench_catalogues/results/rittershofen_test2"
     catalog = obspy.read_events(glob.glob(os.path.join(dirname, "*.xml"))[0])
+    # catalog = obspy.read_events("/home/jheuel/work/ais/zwischenbericht/2024-07-11/figures/events/rittershoffen_jan2024.xml")
     station_json = glob.glob(os.path.join(dirname, "*.json"))[0]
 
     # dirname_stead = "/home/jheuel/code/seisbench_catalogues/results/rittershofen_stead"
 
-    plot_all_traces_with_picks(dirname, client,
-                               starttime=obspy.UTCDateTime("20240128 02:45"),
-                               endtime=obspy.UTCDateTime("20240128 02:55"))
-    for event in catalog.events:
-        fig = plot_event(event=event, client=client, station_json=station_json, with_distance=False)
+    # plot_all_traces_with_picks(dirname, client,
+    #                            starttime=obspy.UTCDateTime("20240123 20:12"),
+    #                            endtime=obspy.UTCDateTime("20240123 20:13"))
+    for index, event in enumerate(catalog.events):
+        fig = plot_event(event=event, client=client, station_json=station_json, with_distance=False, channel="*")
+        a_score = association_score(event=event, station_json=station_json, client=client, cutoff_radius=1.5)
+        print(a_score)
+        #plt.savefig(fname="/home/jheuel/tmp/rittershoffen/{:03d}.png".format(index), dpi=200)
+        #plt.close()
         plt.show()
 
     # catalog = obspy.read_events("/home/jheuel/code/seisbench_catalogues/results/forge_catalog_diting/forge_catalog_diting.xml")
