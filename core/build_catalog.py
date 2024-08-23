@@ -156,8 +156,7 @@ def main(parfile):
 
     # TODO: Since processes can be doubled be careful with number of workers for association
     # Define joblib pool for multiprocessing
-    joblib_pool = joblib.Parallel(n_jobs=parameters.get("nworkers"),
-                                  backend="threading")
+    joblib_pool = joblib.Parallel(n_jobs=parameters.get("nworkers"))
 
     # Loop over each date in dates with joblib
     joblib_pool(
