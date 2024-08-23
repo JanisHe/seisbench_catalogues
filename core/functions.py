@@ -78,9 +78,14 @@ def get_waveforms(sds_path: str, station: str, network: str, channel_code: str,
     return stream
 
 
-def get_daily_waveforms(julday: int, year: int, starttime: obspy.UTCDateTime,
-                        endtime: obspy.UTCDateTime, sds_path: str,
-                        station: str, network: str, channel_code: str,
+def get_daily_waveforms(julday: int,
+                        year: int,
+                        starttime: obspy.UTCDateTime,
+                        endtime: obspy.UTCDateTime,
+                        sds_path: str,
+                        station: str,
+                        network: str,
+                        channel_code: str,
                         sampling_rate: (None, float) = None):
     """
     
@@ -97,9 +102,13 @@ def get_daily_waveforms(julday: int, year: int, starttime: obspy.UTCDateTime,
     """
     sds_pathname = "{sds_path}/{year}/{network}/{station}/{channel}*/*{julday}"
     jd = "{:03d}".format(julday)
-    pathname = sds_pathname.format(sds_path=sds_path, year=year,
-                                   network=network, station=station,
-                                   channel=channel_code, julday=jd)
+    pathname = sds_pathname.format(sds_path=sds_path,
+                                   year=year,
+                                   network=network,
+                                   station=station,
+                                   channel=channel_code,
+                                   julday=jd)
+
     try:
         stream = obspy.read(pathname)
         stream.merge(fill_value=0)
@@ -119,8 +128,13 @@ def get_daily_waveforms(julday: int, year: int, starttime: obspy.UTCDateTime,
     return stream
 
 
-def picking(seisbench_model, stream: obspy.Stream, batch_size: int = 512, P_threshold: float = 0.1,
-            S_threshold: float = 0.1, output_format: str = "pyocto", **kwargs):
+def picking(seisbench_model,
+            stream: obspy.Stream,
+            batch_size: int = 512,
+            P_threshold: float = 0.1,
+            S_threshold: float = 0.1,
+            output_format: str = "pyocto",
+            **kwargs):
 
     if output_format.lower() not in ["gamma", "pyocto"]:
         msg = "Output_format must be either pyocto or gamma."
@@ -186,16 +200,25 @@ def daily_picks(julday: int,
     :param kwargs:
     :return:
     """
-    stream = get_daily_waveforms(julday=julday, year=year, starttime=starttime,
-                                 endtime=endtime, sds_path=sds_path, station=station,
-                                 network=network, channel_code=channel_code,
+    stream = get_daily_waveforms(julday=julday,
+                                 year=year,
+                                 starttime=starttime,
+                                 endtime=endtime,
+                                 sds_path=sds_path,
+                                 station=station,
+                                 network=network,
+                                 channel_code=channel_code,
                                  sampling_rate=sampling_rate)
+    print(julday, year, station)
 
     # Pick with seisbench model
     if len(stream) > 0:
-        picks = picking(seisbench_model=seisbench_model, batch_size=batch_size,
-                        P_threshold=P_threshold, S_threshold=S_threshold,
-                        output_format=output_format, stream=stream, **kwargs)
+        picks = picking(seisbench_model=seisbench_model,
+                        batch_size=batch_size,
+                        P_threshold=P_threshold,
+                        S_threshold=S_threshold,
+                        output_format=output_format,
+                        stream=stream, **kwargs)
 
         # Save picks as pickle
         filename = os.path.join(pathname, f"{network}_{station}_{year}_{julday}.pick")
