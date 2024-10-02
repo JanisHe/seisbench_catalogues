@@ -12,6 +12,7 @@ import pyocto
 
 import pandas as pd
 import numpy as np
+from Cython.Compiler.Future import annotations
 from pyproj import Proj
 from typing import Union
 
@@ -126,6 +127,113 @@ def get_daily_waveforms(julday: int,
         stream.resample(sampling_rate=sampling_rate)
 
     return stream
+
+
+def sembalamce_ensemble_annotations(seisbench_models: list,
+                                    stream: obspy.Stream,
+                                    delta_t: int = 50,
+                                    v: float = 2,
+                                    **kwargs) -> obspy.Stream():
+    """
+
+    :param seisbench_models:
+    :param stream:
+    :param delta_t:
+    :param v:
+    :param kwargs:
+    :return:
+    """
+    # Obtain picks from multiple models
+    for index, model in enumerate(seisbench_models):
+        prediction = model.annotate(stream,
+                                    **kwargs)
+
+        # Allocate empty array for all predictions
+        # Note, last row is for summed up prediction by ensemble method (i.e. len(seisbench_models) + 1)
+        if index == 0:
+            predictions_p = np.empty(shape=(len(seisbench_models) + 1, prediction.select(channel=f"*_P")[0].stats.npts))
+            predictions_s = np.empty(shape=(len(seisbench_models) + 1, prediction.select(channel=f"*_S")[0].stats.npts))
+
+        # Add prediction to empty array
+        predictions_p[index, :] = prediction.select(channel=f"*_P")[0].data
+        predictions_s[index, :] = prediction.select(channel=f"*_S")[0].data
+
+    # Obtain sums for coherence
+    sum_probs_p = np.sum(predictions_p[:-1, :], axis=0) ** 2
+    sum_probs_s = np.sum(predictions_s[:-1, :], axis=0) ** 2
+
+    sum_square_probs_p = np.sum(predictions_p[:-1, :] ** 2, axis=0)
+    sum_square_probs_s = np.sum(predictions_s[:-1, :] ** 2, axis=0)
+
+    # Apply coherence-based ensemble estimation method
+    for i in range(predictions_p.shape[1]):
+        weight_p = np.max(predictions_p[:-1, i])
+        weight_s = np.max(predictions_s[:-1, i])
+
+        lower_bound_sum = i - delta_t
+        upper_bound_sum = i + delta_t
+        if lower_bound_sum < 0:
+            lower_bound_sum = 0
+        if upper_bound_sum >= predictions_p.shape[1]:
+            upper_bound_sum = predictions_p.shape[1] - 1
+
+        coherence_p = np.sum(sum_probs_p[lower_bound_sum: upper_bound_sum]) / (
+                len(seisbench_models) * np.sum(sum_square_probs_p[lower_bound_sum: upper_bound_sum]))
+        coherence_s = np.sum(sum_probs_s[lower_bound_sum: upper_bound_sum]) / (
+                len(seisbench_models) * np.sum(sum_square_probs_s[lower_bound_sum: upper_bound_sum]))
+
+        # Multiply coherence by weight and apply power of v
+        coherence_p = weight_p * coherence_p ** v
+        coherence_s = weight_s * coherence_s ** v
+
+        # Write coherence to final array
+        predictions_p[-1, i] = coherence_p
+        predictions_s[-1, i] = coherence_s
+
+    # Create final obspy trace for model by copying last prediction and changing the data arrays
+    coherence_stream = prediction.copy()
+    coherence_stream.select(channel=f"*_P")[0].data = predictions_p[-1, :]
+    coherence_stream.select(channel=f"*_S")[0].data = predictions_s[-1, :]
+    coherence_stream.select(channel=f"*_N")[0].data = (np.ones(predictions_p.shape[1]) - predictions_p[-1, :] -
+                                                       predictions_s[-1, :])
+
+    return coherence_stream
+
+
+def sembalance_ensemble_picking(seisbench_models: list,
+                                stream: obspy.Stream,
+                                delta_t = 50,
+                                v = 2,
+                                output_format: str = "pyocto",
+                                **kwargs):
+
+    if output_format.lower() not in ["gamma", "pyocto"]:
+        msg = "Output_format must be either pyocto or gamma."
+        raise ValueError(msg)
+
+    coherence_stream = sembalamce_ensemble_annotations(seisbench_models=seisbench_models,
+                                                       stream=stream,
+                                                       delta_t=delta_t,
+                                                       v=v,
+                                                       **kwargs)
+
+    # Classify model as usual with seisbench
+    picks = seisbench_models[0].classify_aggregate(annotations=coherence_stream,
+                                                   argdict=kwargs).picks
+
+    if output_format.lower() == "gamma":
+        picks_df = []
+        for pick in picks:
+            picks_df.append(
+                {"id": f"{stream[0].stats.network}.{stream[0].stats.station}",
+                 "timestamp": pick.peak_time.datetime,
+                 "prob": pick.peak_value,
+                 "type": pick.phase.lower()}
+            )
+
+        return picks_df
+    else:
+        return picks
 
 
 def picking(seisbench_model,
