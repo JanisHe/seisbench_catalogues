@@ -219,11 +219,11 @@ def sembalance_ensemble_picking(seisbench_models: list,
 
     # Classify model as usual with seisbench
     picks = seisbench_models[0].classify_aggregate(annotations=coherence_stream,
-                                                   argdict=kwargs).picks
+                                                   argdict=kwargs)
 
     if output_format.lower() == "gamma":
         picks_df = []
-        for pick in picks:
+        for pick in picks.picks:
             picks_df.append(
                 {"id": f"{stream[0].stats.network}.{stream[0].stats.station}",
                  "timestamp": pick.peak_time.datetime,
@@ -241,16 +241,7 @@ def picking(seisbench_model,
             batch_size: int = 512,
             P_threshold: float = 0.1,
             S_threshold: float = 0.1,
-            output_format: str = "pyocto",
             **kwargs):
-
-    if output_format.lower() not in ["gamma", "pyocto"]:
-        msg = "Output_format must be either pyocto or gamma."
-        raise ValueError(msg)
-
-    # if len(stream) != 3:
-    #     msg = "Can only pick data from one station with 3 channels."
-    #     raise ValueError(msg)
 
     picks = seisbench_model.classify(stream,
                                      batch_size=batch_size,
@@ -258,19 +249,7 @@ def picking(seisbench_model,
                                      S_threshold=S_threshold,
                                      **kwargs)
 
-    if output_format.lower() == "gamma":
-        picks_df = []
-        for pick in picks:
-            picks_df.append(
-                {"id": f"{stream[0].stats.network}.{stream[0].stats.station}",
-                 "timestamp": pick.peak_time.datetime,
-                 "prob": pick.peak_value,
-                 "type": pick.phase.lower()}
-            )
-
-        return picks_df
-    else:
-        return picks
+    return picks
 
 
 def daily_picks(julday: int,
@@ -285,7 +264,6 @@ def daily_picks(julday: int,
                 batch_size: int = 512,
                 P_threshold: float = 0.1,
                 S_threshold: float = 0.1,
-                output_format: str = "pyocto",
                 sampling_rate: (None, float) = None,
                 pathname: str = "tmp_picks",
                 **kwargs):
@@ -303,7 +281,6 @@ def daily_picks(julday: int,
     :param batch_size:
     :param P_threshold:
     :param S_threshold:
-    :param output_format:
     :param pathname:
     :param kwargs:
     :return:
@@ -325,8 +302,8 @@ def daily_picks(julday: int,
                         batch_size=batch_size,
                         P_threshold=P_threshold,
                         S_threshold=S_threshold,
-                        output_format=output_format,
-                        stream=stream, **kwargs)
+                        stream=stream,
+                        **kwargs)
 
         # Save picks as pickle
         filename = os.path.join(pathname, f"{network}_{station}_{year}_{julday}.pick")

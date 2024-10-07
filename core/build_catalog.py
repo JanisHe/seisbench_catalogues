@@ -26,7 +26,7 @@ def daily_catalog(julday: int,
                   stations: pd.DataFrame,
                   channel_code: str,
                   seisbench_model,
-                  assocoation_method: str = "pyocto",
+                  association_method: str = "pyocto",
                   sampling_rate: (None, float) = None,
                   pathname: str = "tmp_picks",
                   **parameters
@@ -46,7 +46,6 @@ def daily_catalog(julday: int,
             station=station.split(".")[1],
             channel_code=channel_code,
             seisbench_model=seisbench_model,
-            output_format=assocoation_method,
             sampling_rate=sampling_rate,
             pathname=pathname,
             **parameters["picking"]
@@ -57,12 +56,12 @@ def daily_catalog(julday: int,
                           julday=julday)
 
     # Association stuff
-    if assocoation_method.lower() == "pyocto":
+    if association_method.lower() == "pyocto":
         catalog = associate_pyocto(
             station_json=stations,
             picks=picks,
             **parameters["association"])
-    elif assocoation_method.lower() == "gamma":
+    elif association_method.lower() == "gamma":
         catalog = associate_gamma(
             picks=picks,
             stations=stations,
@@ -170,6 +169,7 @@ def main(parfile):
             sampling_rate=sampling_rate,
             pathname=tmp_pick_dirname,
             seisbench_model=pn_model,
+            association_method=association_method,
             **parameters
         )
         for date in dates
