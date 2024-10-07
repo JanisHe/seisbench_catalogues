@@ -13,8 +13,8 @@ import pathlib
 import shutil
 import tqdm
 
-import seisbench.models as sbm
-from joblib.testing import param
+from typing import Union
+import seisbench.models as sbm  # noqa
 
 from core.functions import (date_list, load_stations, daily_picks, associate_pyocto, count_picks,
                             picks_per_station, get_tmp_picks, associate_gamma, read_velocity_model)
@@ -77,6 +77,31 @@ def daily_catalog(julday: int,
                       format="QUAKEML")
 
 
+def load_single_model(phasenet_model: str):
+    if os.path.isfile(phasenet_model):
+        pn_model = torch.load(phasenet_model,
+                              map_location=torch.device('cpu'),
+                              weights_only=False)
+    else:
+        pn_model = sbm.PhaseNet.from_pretrained(phasenet_model,
+                                                update=True)
+
+    return pn_model
+
+
+def load_models(phasenet_model: Union[str, dict]):
+    if isinstance(phasenet_model, str):
+        pn_model = load_single_model(phasenet_model=phasenet_model)
+    elif isinstance(phasenet_model, dict):
+        pn_model = []
+        for value in phasenet_model.values():
+            pn_model.append(load_single_model(
+                phasenet_model=value
+            ))
+
+    return pn_model
+
+
 def main(parfile):
     """
 
@@ -95,13 +120,16 @@ def main(parfile):
     shutil.copyfile(src=parameters["data"]["stations"],
                     dst=os.path.join(dirname, f'{pathlib.Path(parameters["filename"]).stem}.json'))
 
-    # Load PhaseNet model
-    if os.path.isfile(parameters["picking"].get("phasenet_model")):
-        pn_model = torch.load(parameters["picking"].pop("phasenet_model"),
-                              map_location=torch.device('cpu'))
-    else:
-        pn_model = sbm.PhaseNet.from_pretrained(parameters["picking"].pop("phasenet_model"),
-                                                update=True)
+    # Load PhaseNet model(s)
+    # If parameter phasenet_model is of type str, then one model is loaded, otherwise if phasenet_model is of type
+    # dict all models in dict are loaded and semblance picking is applied
+    pn_model = load_models(phasenet_model=parameters["picking"].pop("phasenet_model"))
+    # if os.path.isfile(parameters["picking"].get("phasenet_model")):
+    #     pn_model = torch.load(parameters["picking"].pop("phasenet_model"),
+    #                           map_location=torch.device('cpu'))
+    # else:
+    #     pn_model = sbm.PhaseNet.from_pretrained(parameters["picking"].pop("phasenet_model"),
+    #                                             update=True)
 
     # Load stations
     stations = load_stations(station_json=parameters["data"]["stations"])

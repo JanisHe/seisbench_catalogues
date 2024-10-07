@@ -12,9 +12,9 @@ import pyocto
 
 import pandas as pd
 import numpy as np
-from Cython.Compiler.Future import annotations
 from pyproj import Proj
 from typing import Union
+import seisbench.models as sbm  # noqa
 
 from obspy.core.event.origin import Pick, Origin
 from obspy.core.event.event import Event
@@ -129,11 +129,11 @@ def get_daily_waveforms(julday: int,
     return stream
 
 
-def sembalamce_ensemble_annotations(seisbench_models: list,
-                                    stream: obspy.Stream,
-                                    delta_t: int = 50,
-                                    v: float = 2,
-                                    **kwargs) -> obspy.Stream():
+def semblance_ensemble_annotations(seisbench_models: list,
+                                   stream: obspy.Stream,
+                                   delta_t: int = 50,
+                                   v: float = 2,
+                                   **kwargs) -> obspy.Stream():
     """
 
     :param seisbench_models:
@@ -200,54 +200,50 @@ def sembalamce_ensemble_annotations(seisbench_models: list,
     return coherence_stream
 
 
-def sembalance_ensemble_picking(seisbench_models: list,
-                                stream: obspy.Stream,
-                                delta_t = 50,
-                                v = 2,
-                                output_format: str = "pyocto",
-                                **kwargs):
+def semblance_ensemble_picking(seisbench_models: list,
+                               stream: obspy.Stream,
+                               delta_t = 50,
+                               v = 2,
+                               P_threshold: float = 0.2,
+                               S_threshold: float = 0.2,
+                               **kwargs):
 
-    if output_format.lower() not in ["gamma", "pyocto"]:
-        msg = "Output_format must be either pyocto or gamma."
-        raise ValueError(msg)
-
-    coherence_stream = sembalamce_ensemble_annotations(seisbench_models=seisbench_models,
-                                                       stream=stream,
-                                                       delta_t=delta_t,
-                                                       v=v,
-                                                       **kwargs)
+    coherence_stream = semblance_ensemble_annotations(seisbench_models=seisbench_models,
+                                                      stream=stream,
+                                                      delta_t=delta_t,
+                                                      v=v,
+                                                      **kwargs)
 
     # Classify model as usual with seisbench
     picks = seisbench_models[0].classify_aggregate(annotations=coherence_stream,
-                                                   argdict=kwargs)
+                                                   argdict=dict(P_threshold=P_threshold,
+                                                                S_threshold=S_threshold)
+                                                   )
 
-    if output_format.lower() == "gamma":
-        picks_df = []
-        for pick in picks.picks:
-            picks_df.append(
-                {"id": f"{stream[0].stats.network}.{stream[0].stats.station}",
-                 "timestamp": pick.peak_time.datetime,
-                 "prob": pick.peak_value,
-                 "type": pick.phase.lower()}
-            )
-
-        return picks_df
-    else:
-        return picks
+    return picks
 
 
-def picking(seisbench_model,
+def picking(seisbench_model: Union[list, sbm.phasenet.PhaseNet],
             stream: obspy.Stream,
             batch_size: int = 512,
             P_threshold: float = 0.1,
             S_threshold: float = 0.1,
             **kwargs):
 
-    picks = seisbench_model.classify(stream,
-                                     batch_size=batch_size,
-                                     P_threshold=P_threshold,
-                                     S_threshold=S_threshold,
-                                     **kwargs)
+    if isinstance(seisbench_model, list) is True:
+        picks = semblance_ensemble_picking(seisbench_models=seisbench_model,
+                                           stream=stream,
+                                           P_threshold=P_threshold,
+                                           S_threshold=S_threshold,
+                                           **kwargs
+                                           )
+    else:
+        picks = seisbench_model.classify(stream,
+                                         batch_size=batch_size,
+                                         P_threshold=P_threshold,
+                                         S_threshold=S_threshold,
+                                         **kwargs
+                                         )
 
     return picks
 
