@@ -124,12 +124,6 @@ def main(parfile):
     # If parameter phasenet_model is of type str, then one model is loaded, otherwise if phasenet_model is of type
     # dict all models in dict are loaded and semblance picking is applied
     pn_model = load_models(phasenet_model=parameters["picking"].pop("phasenet_model"))
-    # if os.path.isfile(parameters["picking"].get("phasenet_model")):
-    #     pn_model = torch.load(parameters["picking"].pop("phasenet_model"),
-    #                           map_location=torch.device('cpu'))
-    # else:
-    #     pn_model = sbm.PhaseNet.from_pretrained(parameters["picking"].pop("phasenet_model"),
-    #                                             update=True)
 
     # Load stations
     stations = load_stations(station_json=parameters["data"]["stations"])

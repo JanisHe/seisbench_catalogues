@@ -143,9 +143,14 @@ def semblance_ensemble_annotations(seisbench_models: list,
     :param kwargs:
     :return:
     """
+    # Check sampling rate of all models (if sampling rates are not equal, an error is raised)
+    if not all(model.sampling_rate == seisbench_models[0].sampling_rate for model in seisbench_models):
+        msg = "Sampling rate of loaded models are not equal but equal sampling rates are required."
+        raise ValueError(msg)
+
     # Obtain picks from multiple models
     for index, model in enumerate(seisbench_models):
-        prediction = model.annotate(stream,
+        prediction = model.annotate(stream=stream,
                                     **kwargs)
 
         # Allocate empty array for all predictions
