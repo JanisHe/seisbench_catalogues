@@ -115,14 +115,20 @@ def main(parfile):
     dirname = os.path.join("..", "results", pathlib.Path(parameters["filename"]).stem)
     if os.path.isdir(dirname) is False:
         os.makedirs(dirname)
-    shutil.copyfile(src=parfile,
-                    dst=os.path.join(dirname, f'{pathlib.Path(parameters["filename"]).stem}.yml'))
-    shutil.copyfile(src=parameters["data"]["stations"],
-                    dst=os.path.join(dirname, f'{pathlib.Path(parameters["filename"]).stem}.json'))
+    try:
+        shutil.copyfile(src=parfile,
+                        dst=os.path.join(dirname, f'{pathlib.Path(parameters["filename"]).stem}.yml'))
+        shutil.copyfile(src=parameters["data"]["stations"],
+                        dst=os.path.join(dirname, f'{pathlib.Path(parameters["filename"]).stem}.json'))
+    except shutil.SameFileError as e:
+        print(e)
+        print("Keeping old file and do not overwrite")
 
-    # Load PhaseNet model(s)
+    # Copy PhaseNet model and load PhaseNet model(s)
     # If parameter phasenet_model is of type str, then one model is loaded, otherwise if phasenet_model is of type
     # dict all models in dict are loaded and semblance picking is applied
+    # shutil.copyfile(src=parameters["picking"]["phasenet_model"],
+    #                 dst=os.path.join(dirname, pathlib.Path(parameters["picking"]["phasenet_model"]).name))
     pn_model = load_models(phasenet_model=parameters["picking"].pop("phasenet_model"))
 
     # Load stations
