@@ -770,7 +770,7 @@ def associate_gamma(picks,
                         phase_hint=p["type"].upper(),
                         time_errors=QuantityError(),
                         comments=[comments])
-            pick.time_errors["uncertainty"] = p["end_time"] - p["start_time"]
+            pick.time_errors["uncertainty"] = (p["end_time"] - p["start_time"]) / 2
             picks_lst.append(pick)
 
         origin = Origin(time=catalog["time"][event_count],
