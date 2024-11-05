@@ -11,8 +11,14 @@ from core.functions import load_stations, area_limits
 
 class Event2NLL:
 
-    def __init__(self, catalog: Catalog, nll_basepath: str, vel_model: str, stations_json: str,
-                 nll_executable="/work/software/nlloc/7.00.16/src/bin", create_files=True, **kwargs,):
+    def __init__(self,
+                 catalog: Catalog,
+                 nll_basepath: str,
+                 vel_model: str,
+                 stations_json: str,
+                 nll_executable="/work/software/nlloc/7.00.16/src/bin",
+                 create_files=True,
+                 **kwargs,):
         self.catalog = catalog
         self.nll_basepath = nll_basepath
         self.vel_model = vel_model
@@ -40,7 +46,8 @@ class Event2NLL:
         else:
             self.conf_file = glob.glob(os.path.join(self.nll_basepath, 'conf', '*'))[0]
 
-    def create_nll_dirs(self, delete_basepath=True):
+    def create_nll_dirs(self,
+                        delete_basepath=True):
         if os.path.isdir(self.nll_basepath) and delete_basepath is True:
             shutil.rmtree(self.nll_basepath)
 
@@ -67,7 +74,8 @@ class Event2NLL:
                                          pick.time_errors.uncertainty))
                 f_obs.write("\n\n")
 
-    def create_config(self, gtfile="P",
+    def create_config(self,
+                      gtfile="P",
                       signature="LOCSIG Janis Heuel - KIT",
                       comment="LOCCOM Test"):
         """
@@ -159,7 +167,8 @@ class Event2NLL:
         execute = os.path.join(self.nll_executables, 'NLLoc')
         os.system(f"{execute} {self.conf_file}")
 
-    def run_nll(self, delete_dirs=None):
+    def run_nll(self,
+                delete_dirs=None):
         self.run_vel2grid()
         self.run_grid2time()
         self.localise()
@@ -169,7 +178,8 @@ class Event2NLL:
             for dir_name in delete_dirs:
                 self.delete_dir_content(directory=dir_name)
 
-    def delete_dir_content(self, directory):
+    def delete_dir_content(self,
+                           directory):
         files = glob.glob(os.path.join(self.nll_basepath, directory, "*"))
         for filename in files:
             os.remove(filename)
@@ -179,7 +189,9 @@ def nll_object(nll):
     nll.run_nll(delete_dirs=["time", "model"])
 
 
-def update_events_from_nll(station_json, nll_basepath, depth_filter=10000):
+def update_events_from_nll(station_json,
+                           nll_basepath,
+                           depth_filter=10000):
     # Read all .hyp files from NonLinLoc
     hyp_files = glob.glob(os.path.join(nll_basepath, 'locs', 'loc.*.grid0.loc.hyp'))
 
