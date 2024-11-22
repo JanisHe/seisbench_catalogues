@@ -369,8 +369,8 @@ def sort_events(events: list):
     # Create list with all dates
     dates = [event.origins[0].time.datetime for event in events]
 
-    # Sort event_list by dates
-    sorted_events = [x for _, x in zip(sorted(dates), events)]
+    zipped_pairs = zip(dates, events)
+    sorted_events = [x for _, x in sorted(zipped_pairs)]
 
     return sorted_events
 
@@ -1090,3 +1090,4 @@ if __name__ == "__main__":
                   result_dir2="/home/jheuel/code/seisbench_catalogues/results/steadbasis_induced_tl",
                   filename="stead_comparison.txt",
                   residual=0.4)
+
