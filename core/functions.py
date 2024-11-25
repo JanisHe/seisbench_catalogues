@@ -312,8 +312,8 @@ def daily_picks(julday: int,
         with open(filename, "wb") as handle:
             pickle.dump(picks, handle)
 
-    del picks
-    gc.collect()
+        del picks
+        gc.collect()
 
 
 def convert_station_json(stations: dict) -> pd.DataFrame:
