@@ -3,6 +3,7 @@ import glob
 import json
 import pathlib
 import warnings
+import gc
 
 import tqdm
 import pickle
@@ -310,6 +311,9 @@ def daily_picks(julday: int,
         filename = os.path.join(pathname, f"{network}_{station}_{year}_{julday}.pick")
         with open(filename, "wb") as handle:
             pickle.dump(picks, handle)
+
+    del picks
+    gc.collect()
 
 
 def convert_station_json(stations: dict) -> pd.DataFrame:
