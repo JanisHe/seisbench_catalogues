@@ -57,6 +57,7 @@ def get_waveforms(sds_path: str, station: str, network: str, channel_code: str,
     stream = obspy.Stream()
     for i, d in enumerate(dates):
         jd = "{:03d}".format(d[1])
+        # TODO: Add location code to read correct data, if given in station_json
         pathname = sds_pathname.format(sds_path=sds_path, year=d[0],
                                        network=network, station=station,
                                        channel=channel_code, julday=jd)
@@ -374,7 +375,12 @@ def sort_events(events: list):
     dates = [event.origins[0].time.datetime for event in events]
 
     zipped_pairs = zip(dates, events)
-    sorted_events = [x for _, x in sorted(zipped_pairs)]
+    try:
+        sorted_events = [x for _, x in sorted(zipped_pairs)]
+    except TypeError:
+        print(zipped_pairs)
+        print("# BEGIN MESSAGE #\nDid not sort events\n# END MESSAGE #")
+        return events
 
     return sorted_events
 
