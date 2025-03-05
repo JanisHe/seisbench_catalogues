@@ -20,7 +20,7 @@ import seisbench.models as sbm  # noqa
 from obspy.core.event.origin import Pick, Origin
 from obspy.core.event.event import Event
 from obspy.core.event.base import WaveformStreamID, Comment, QuantityError
-from obspy.geodetics.base import locations2degrees, degrees2kilometers
+from obspy.geodetics.base import locations2degrees, degrees2kilometers, gps2dist_azimuth
 from gamma.utils import association
 
 
@@ -531,7 +531,10 @@ def association_score(event, client, station_json, cutoff_radius=10):
     return score
 
 
-def associate_pyocto(station_json: (str, pd.DataFrame), picks, velocity_model, **kwargs):
+def associate_pyocto(station_json: (str, pd.DataFrame),
+                     picks,
+                     velocity_model,
+                     **kwargs):
     """
 
     :param station_json:
@@ -575,37 +578,48 @@ def associate_pyocto(station_json: (str, pd.DataFrame), picks, velocity_model, *
     events["time"] = events["time"].apply(datetime.datetime.fromtimestamp, tz=datetime.timezone.utc)
     assignments["time"] = assignments["time"].apply(datetime.datetime.fromtimestamp, tz=datetime.timezone.utc)
 
-    # Create picks for catalog
+    # Merge events to pick assignments
+    assignments = pd.merge(events, assignments, left_on="idx", right_on="event_idx", suffixes=("", "_pick"))
+
+    # Create final obspy catalogue from events and picks
+    # Picks are stored in a dictionary for each event by idx of event
     picks_dct = {}
-    for idx in range(len(assignments["event_idx"])):
-        waveform_id = WaveformStreamID(network_code=assignments["station"][idx].split(".")[0],
-                                       station_code=assignments["station"][idx].split(".")[1],
-                                       location_code=assignments["station"][idx].split(".")[2])
-        pick = Pick(time=obspy.UTCDateTime(assignments["time"][idx]),
+    origins = {}
+    for i in range(len(assignments)):
+        event_idx = assignments.loc[i, "idx"]
+        if event_idx not in picks_dct.keys():
+            picks_dct.update({event_idx: []})  # List with all picks for an event
+
+        if event_idx not in origins.keys():
+            origins.update({event_idx: Origin(time=obspy.UTCDateTime(assignments.loc[i, "time"]),
+                                              latitude=assignments.loc[i, "longitude"],
+                                              longitude=assignments.loc[i, "longitude"],
+                                              depth=assignments.loc[i, "depth"] * 1000)
+                            })
+        # Create obspy pick
+        network_code, station_code, location = assignments.loc[i, "station"].split(".")
+        waveform_id = WaveformStreamID(network_code=network_code,
+                                       station_code=station_code,
+                                       location_code=location)
+        pick = Pick(time=obspy.UTCDateTime(assignments.loc[i, "time_pick"]),
                     waveform_id=waveform_id,
-                    phase_hint=assignments["phase"][idx],
-                    time_erros=QuantityError()
+                    phase_hint=assignments.loc[i, "phase"]
                     )
-        pick.time_errors["uncertainty"] = (picks[assignments["pick_idx"][idx]].end_time -
-                                           picks[assignments["pick_idx"][idx]].start_time)
+        # Append pick to event_idx in dictionary
+        picks_dct[event_idx].append(pick)
 
-        if assignments["event_idx"][idx] in picks_dct.keys():
-            picks_dct[assignments["event_idx"][idx]].append(pick)
-        else:
-            picks_dct.update({assignments["event_idx"][idx]: [pick]})
-
-    # Create obspy catalog
-    event_lst = []
-    for index in events["idx"]:
-        origin = Origin(time=obspy.UTCDateTime(events["time"][index]), longitude=events["longitude"][index],
-                        latitude=events["latitude"][index], depth=events["depth"][index] * 1e3)
-        ev = Event(picks=picks_dct[index], force_resource_id=True, origins=[origin])
-        event_lst.append(ev)
+    # Create obspy catalogue from picks_dct and origins
+    event_list = []
+    for event_idx in origins.keys():
+        event_list.append(Event(origins=[origins[event_idx]],
+                                picks=picks_dct[event_idx],
+                                force_resource_id=True)
+                          )
 
     # Sort events by date
-    event_lst = sort_events(events=event_lst)
+    event_list = sort_events(events=event_list)
 
-    return obspy.Catalog(event_lst)
+    return obspy.Catalog(event_list)
 
 
 def associate_gamma(picks,
@@ -885,7 +899,8 @@ def picks_per_station(seisbench_picks: list,
         raise ValueError(msg)
 
 
-def get_tmp_picks(dirname, julday=None):
+def get_tmp_picks(dirname,
+                  julday=None):
     """
 
     :param dirname:
@@ -1072,6 +1087,203 @@ def compare_catalogs(catalog1, catalog2, origin_time_diff=2.5, verbose=False):
     return diff_events_cat1, diff_events_cat2
 
 
+def _get_origin_attrib(
+    event: Event,
+    attribute: str
+) -> Union[float, obspy.UTCDateTime]:
+    """ Get an event origin attribute. """
+    try:
+        return (event.preferred_origin() or event.origins[-1]
+                ).__getattribute__(attribute)
+    except (IndexError, AttributeError):
+        return None
+
+
+def _get_magnitude_attrib(
+    event: Event,
+    attribute: str,
+    magnitude_type: str = None
+) -> Union[float, str]:
+    """ Get a magnitude attribute. """
+    if magnitude_type:
+        magnitude = [magnitude for magnitude in event.magnitudes
+                     if magnitude.magnitude_type == magnitude_type]
+        if len(magnitude) == 0:
+            return None
+        magnitude = magnitude[0]
+    else:
+        try:
+            magnitude = event.preferred_magnitude() or event.magnitudes[-1]
+        except IndexError:
+            return None
+    try:
+        return magnitude.__getattribute__(attribute)
+    except AttributeError:
+        return None
+
+
+def _get_arrival_for_amplitude(amplitude,
+                               event: Event):
+    ori = event.preferred_origin() or event.origins[-1]
+    if amplitude.pick_id is None:
+        print("Amplitude not matched to pick")
+        return None
+    pick = amplitude.pick_id.get_referred_object()
+    if pick is None:
+        print("Amplitude not matched to pick")
+        return None
+    # Need an arrival on this station to get the distance
+    arrival = [arr for arr in ori.arrivals
+                if arr.pick_id.get_referred_object().waveform_id.station_code == pick.waveform_id.station_code
+                and arr.distance]
+    if len(arrival) == 0:
+        print(f"No arrival found for {pick.waveform_id.station_code}, skipping")
+        return None
+    arrival = arrival[0]
+    return arrival
+
+
+def _get_amplitude_value(amplitude) -> float:
+    # Convert to m
+    amp = amplitude.generic_amplitude
+    if amplitude.type == "IAML":
+        # Apply Wood Anderson sensitivity - ISAPEI standard is removed
+        amp *= 2080.0
+    if amplitude.unit is None:
+        warnings.warn(
+            "No amplitude unit specified, assuming this is m - "
+            "use with caution!!!")
+    elif amplitude.unit != "m":
+        raise NotImplementedError(
+            "Only written to work with SI displacement units.")
+    return amp
+
+
+def summarize_catalog(catalog: obspy.Catalog,
+                      magnitude_type: str = None) -> pd.DataFrame:
+    """
+    Summarize a catalog into a sparse dataframe of origin information
+    """
+    if magnitude_type:
+        events = [ev for ev in catalog.events
+                  if magnitude_type in [mag.magnitude_type
+                                        for mag in ev.magnitudes]]
+    else:
+        events = catalog.events
+    event_ids = [ev.resource_id.id.split('/')[-1] for ev in events]
+    origin_times = [_get_origin_attrib(ev, "time") for ev in events]
+    latitudes = [_get_origin_attrib(ev, "latitude") for ev in events]
+    longitudes = [_get_origin_attrib(ev, "longitude") for ev in events]
+    depths = [_get_origin_attrib(ev, "depth") for ev in events]
+    magnitudes = [
+        _get_magnitude_attrib(ev, "mag", magnitude_type=magnitude_type)
+        for ev in events]
+    magnitude_types = [
+        _get_magnitude_attrib(ev, "magnitude_type",
+                              magnitude_type=magnitude_type)
+        for ev in events]
+
+    catalog_df = pd.DataFrame(data=dict(
+        event_id=event_ids, origin_time=origin_times, latitude=latitudes,
+        longitude=longitudes, depth=depths, magnitude=magnitudes,
+        magnitude_type=magnitude_types))
+
+    return catalog_df
+
+
+def find_matching_events(
+        catalog_1: obspy.Catalog,
+        catalog_2: obspy.Catalog,
+        time_difference: float = 5.0,
+        epicentral_difference: float = 20.0,
+        depth_difference: float = 40.0,
+        magnitude_type: str = None,
+) -> dict:
+    """
+    Find matching events between two catalogs.
+
+    https://bitbucket.org/calum-chamberlain/utilities/src/b6699258edb6639eea31815a437a329041ed87f0/cjc_utilities/magnitude_inversion/magnitude_inversion.py#lines-241
+
+    Parameters
+    ----------
+    catalog_1
+        A catalog to compare to catalog_2
+    catalog_2
+        A catalog to compare to catalog_1
+    time_difference
+        Maximum allowed difference in origin time in seconds between matching
+        events
+    epicentral_difference
+        Maximum allowed difference in epicentral distance in km between
+        matching events
+    depth_difference
+        Maximum allowed difference in depth in km between matching events.
+    magnitude_type
+        Magnitude type for comparison, will only return events in catalog_1
+        with this magnitude
+
+    Returns
+    -------
+    Dictionary of matching events ids. Keys will be from catalog_1.
+    """
+    df_1 = summarize_catalog(catalog_1, magnitude_type=magnitude_type)
+    df_2 = summarize_catalog(catalog_2)
+    if len(df_2) == 0:
+        return None
+
+    swapped = False
+    if len(df_1) > len(df_2):
+        # Flip for efficiency, will loop over the shorter of the two and use
+        # more efficient vectorized methods on the longer one
+        df_1, df_2 = df_2, df_1
+        swapped = True
+
+    timestamp = min(min(df_1.origin_time), min(df_2.origin_time))
+    comparison_times = np.array([t - timestamp for t in df_2.origin_time])
+
+    print("Starting event comparison.")
+    matched_quakes = dict()
+    for i in tqdm.tqdm(range(len(df_1))):
+        origin_time = obspy.UTCDateTime(df_1.origin_time[i])
+        origin_seconds = origin_time - timestamp
+        deltas = np.abs(comparison_times - origin_seconds)
+        index = np.argmin(deltas)
+        delta = deltas[index]
+        if delta > time_difference:
+            continue  # Too far away in time
+        depth_sep = abs(df_1.depth[i] - df_2.depth[index]) / 1000.0  # to km
+        if depth_sep > depth_difference:
+            continue  # Too far away in depth
+        # distance check
+        dist, _, _ = gps2dist_azimuth(
+            lat1=df_2.latitude[index],
+            lon1=df_2.longitude[index],
+            lat2=df_1.latitude[i],
+            lon2=df_1.longitude[i])
+        dist /= 1000.
+        if dist > epicentral_difference:
+            continue  # Too far away epicentrally
+        matched_id = df_2.event_id[index]
+        if matched_id in matched_quakes.keys():
+            # Check whether this is a better match
+            if delta > matched_quakes[matched_id]["delta"] or \
+                    dist > matched_quakes[matched_id]["dist"] or \
+                    depth_sep > matched_quakes[matched_id]["depth_sep"]:
+                continue  # Already matched to another, better matched event
+        matched_quakes.update(
+            {matched_id: dict(
+                delta=delta, dist=dist, depth_sep=depth_sep,
+                matched_id=df_1.event_id[i])})
+
+    # We just want the event mapper
+    if not swapped:
+        return {key: value["matched_id"]
+                for key, value in matched_quakes.items()}
+    else:
+        return {value["matched_id"]: key
+                for key, value in matched_quakes.items()}
+
+
 def compare_catalogs_from_result_dir(
         result_dir1, result_dir2, origin_time_diff: float = 2.5, verbose=False
 ):
@@ -1088,7 +1300,109 @@ def compare_catalogs_from_result_dir(
     )
 
 
+def find_pick(dataframe, datetime, pick_resiudal=0.5):
+    picktimes, phases = [], []
+    for index in range(len(dataframe)):
+        if abs(obspy.UTCDateTime(dataframe["peak_time"][index]) - obspy.UTCDateTime(datetime)) <= pick_resiudal:
+            picktime, phase = dataframe["peak_time"][index], dataframe["phase"][index]
+            picktimes.append(obspy.UTCDateTime(picktime))
+            phases.append(phase)
 
+    return picktimes, phases
+
+
+def manual_seisbench(cat_man: obspy.Catalog,
+                     result_dir_sb: str,
+                     residual: float=0.3):
+    """
+    Compares picks of manual catalogue and catalogue (result_dir) created with seisbench catalogue project.
+    """
+    # Read all picks from SeisBench catalogue
+    files = glob.glob(os.path.join(result_dir_sb, "picks", "*"))
+    df_dict_sb = {}
+    for filename in files:
+        trace_id = pathlib.Path(filename).stem
+        df_dict_sb.update({trace_id: pd.read_csv(filename)})
+
+    # Loop over each event in manual catalog
+    event_dict = {}  # key: origin time of event, second dict with phase in catalog and True or False,
+                     # Maybe third dict with residuals
+    for event in cat_man:
+        event_dict.update({str(event.origins[-1].time): {"phase_manuel": [],
+                                                         "pick_time": [],
+                                                         "waveform_id": [],
+                                                         "in_picklist": [],
+                                                         "residual": [],
+                                                         "num_pred_p_picks": 0,
+                                                         "num_pred_s_picks": 0,
+                                                         "waveform_id_pick": [],
+                                                         "waveform_id_P_S": [],
+                                                         "p_rate": 0.0,
+                                                         "s_rate": 0.0}
+                           })
+        count_p = 0
+        count_s = 0
+        count_true_p = 0
+        count_true_s = 0
+        for pick in event.picks:  # Loop over each pick and compare pick with seisbench picks
+            trace_id = (f"{pick.waveform_id.network_code}.{pick.waveform_id.station_code}."
+                        f"{pick.waveform_id.location_code}")
+            # Find whether pick is in SeisBench picks
+            if trace_id in df_dict_sb.keys():
+                time, phase = find_pick(dataframe=df_dict_sb[trace_id],
+                                        datetime=pick.time,
+                                        pick_resiudal=residual)
+
+                # Append manual phase to dictionary
+                event_dict[str(event.origins[-1].time)]["phase_manuel"].append(pick.phase_hint)
+                event_dict[str(event.origins[-1].time)]["pick_time"].append(pick.time)
+                event_dict[str(event.origins[-1].time)]["waveform_id"].append(trace_id)
+
+                # True picks
+                if pick.phase_hint.lower() in ["p", "pg", "pn"]:
+                    count_true_p += 1
+                elif pick.phase_hint.lower() in ["s", "sg", "sn"]:
+                    count_true_s += 1
+
+                if len(time) > 0:
+                    found_pick = False
+                    for p, t in zip(phase, time):
+                        pick_residual = t - pick.time
+                        if pick.phase_hint.lower() in ["p", "pg", "pn"] and p.lower() == "p":
+                            event_dict[str(event.origins[-1].time)]["in_picklist"].append(True)
+                            event_dict[str(event.origins[-1].time)]["residual"].append(pick_residual)
+                            event_dict[str(event.origins[-1].time)]["waveform_id_pick"].append(f"{trace_id}_P")
+                            count_p += 1
+                            found_pick = True
+                            break
+                        elif pick.phase_hint.lower() in ["s", "sg", "sn"] and p.lower() == "s":
+                            event_dict[str(event.origins[-1].time)]["in_picklist"].append(True)
+                            event_dict[str(event.origins[-1].time)]["residual"].append(pick_residual)
+                            event_dict[str(event.origins[-1].time)]["waveform_id_pick"].append(f"{trace_id}_S")
+                            count_s += 1
+                            found_pick = True
+                            break
+                    if found_pick is False:  # If phase of predicted pick does match phase of manual pick
+                        event_dict[str(event.origins[-1].time)]["in_picklist"].append(False)
+                        event_dict[str(event.origins[-1].time)]["residual"].append(np.nan)
+                else:
+                    event_dict[str(event.origins[-1].time)]["in_picklist"].append(False)
+                    event_dict[str(event.origins[-1].time)]["residual"].append(np.nan)
+
+        # Update P and S rate, i.e. how many picks have been detected in percent
+        # event_dict[str(event.origins[-1].time)]["p_rate"] = count_p / count_true_p * 100
+        # event_dict[str(event.origins[-1].time)]["s_rate"] = count_s / count_true_s * 100
+        event_dict[str(event.origins[-1].time)]["num_pred_p_picks"] = count_p
+        event_dict[str(event.origins[-1].time)]["num_pred_s_picks"] = count_s
+
+        # Count waveforms with both P and S arrivals
+        for id_P in event_dict[str(event.origins[-1].time)]["waveform_id_pick"]:
+            if id_P[-2:] == "_P":  # Look up for S wave ID
+                id_S = f"{id_P[:-2]}_S"
+                if id_S in event_dict[str(event.origins[-1].time)]["waveform_id_pick"]:
+                    event_dict[str(event.origins[-1].time)]["waveform_id_P_S"].append(id_P[:-2])
+
+    return event_dict
 
 
 
@@ -1096,8 +1410,76 @@ if __name__ == "__main__":
     # compare_catalogs(result_dir1="/home/jheuel/nextcloud/code/seisbench_catalogues/results/steadbasis",
     #                  result_dir2="/home/jheuel/nextcloud/code/seisbench_catalogues/results/steadbasis_induced")
 
-    compare_picks(result_dir1="/home/jheuel/code/seisbench_catalogues/results/steadbasis",
-                  result_dir2="/home/jheuel/code/seisbench_catalogues/results/steadbasis_induced_tl",
-                  filename="stead_comparison.txt",
-                  residual=0.4)
+    # compare_picks(result_dir1="/home/jheuel/code/seisbench_catalogues/results/steadbasis",
+    #               result_dir2="/home/jheuel/code/seisbench_catalogues/results/steadbasis_induced_tl",
+    #               filename="stead_comparison.txt",
+    #               residual=0.4)
 
+    from obspy.clients.filesystem.sds import Client
+    import torch
+    import shutil
+
+    event_dict = manual_seisbench(cat_man=obspy.read_events("/home/jheuel/work/ais/catalogs/sequence_march2024_subset.xml"),
+                                  result_dir_sb="/home/jheuel/nextcloud/code/seisbench_catalogues/results/rittershoffen_bpfilter")
+
+    model = torch.load("/home/jheuel/code/train_phasenet/models/propulate_rittershoffen/models/rittershoffen_0.09777.pt",
+                       map_location=torch.device("cpu"))
+    client = Client("/home/jheuel/data/SDS")
+
+    # Determine if event can be associated successfully
+    associated_events = 0
+    for time, event in event_dict.items():
+        p_rate = event["p_rate"]
+        s_rate = event["s_rate"]
+        num_p_picks = event["num_pred_p_picks"]
+        num_s_picks = event["num_pred_s_picks"]
+        p_s_picks = len(event["waveform_id_P_S"])
+
+        if p_rate >= 0.5 and s_rate >= 0.5 and num_p_picks >= 4 and num_s_picks >= 4 and p_s_picks >= 3:
+            associated_events += 1
+        else:
+            # shutil.copyfile(src=f"/home/jheuel/Pictures/sequence_march2024/rittershoffen_bpfilter/{time}.png",
+            #                 dst=f"/home/jheuel/Pictures/sequence_march2024/not_associated/{time}.png")
+            print(time)
+
+    print("Number of possible associated events:", associated_events)
+    print("Number of not possible associated events:", len(event_dict) - associated_events)
+
+
+    # # Plot missed picks
+    # for time, event in event_dict.items():
+    #     if event["p_rate"] < 50 or event["s_rate"] < 50:
+    #         for in_picklist, waveform_id, pick_time, phase in zip(event["in_picklist"], event["waveform_id"], event["pick_time"], event["phase_manuel"]):
+    #             if in_picklist is False:
+    #                 network, station, location = waveform_id.split(".")
+    #                 stream = client.get_waveforms(network=network, station=station, location=location,
+    #                                               channel="*", starttime=obspy.UTCDateTime(time) - 30,
+    #                                               endtime=obspy.UTCDateTime(time) + 60)
+    #                 stream.filter(type="bandpass", freqmin=5, freqmax=40)
+    #
+    #                 preds = model.annotate(stream,
+    #                                        blinding=[250, 250],
+    #                                        overlap=1500)
+    #
+    #                 fig = plt.figure()
+    #                 ax1 = fig.add_subplot(211)
+    #                 time_array = np.arange(0, stream[0].stats.npts) * stream[0].stats.delta
+    #                 time_array = [stream[0].stats.starttime.datetime + datetime.timedelta(seconds=k) for k in time_array]
+    #
+    #                 for trace in stream:
+    #                     ax1.plot(time_array, trace.data)
+    #
+    #                 ax2 = fig.add_subplot(212, sharex=ax1)
+    #                 for trace in preds:
+    #                     time_array = np.arange(0, trace.stats.npts) * trace.stats.delta
+    #                     time_array = [trace.stats.starttime.datetime + datetime.timedelta(seconds=k) for k in time_array]
+    #                     if trace.stats.channel[-1] != "N":
+    #                         ax2.plot(time_array, trace.data)
+    #
+    #                 if phase.lower() in ["p", "pg", "pn"]:
+    #                     color = "tab:blue"
+    #                 else:
+    #                     color = "tab:orange"
+    #                 ax2.axvline(pick_time.datetime, color=color)
+    #
+    #                 plt.show()
