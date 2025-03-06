@@ -592,7 +592,7 @@ def associate_pyocto(station_json: (str, pd.DataFrame),
 
         if event_idx not in origins.keys():
             origins.update({event_idx: Origin(time=obspy.UTCDateTime(assignments.loc[i, "time"]),
-                                              latitude=assignments.loc[i, "longitude"],
+                                              latitude=assignments.loc[i, "latitude"],
                                               longitude=assignments.loc[i, "longitude"],
                                               depth=assignments.loc[i, "depth"] * 1000)
                             })
