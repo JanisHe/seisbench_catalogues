@@ -12,13 +12,17 @@ import pyocto
 import pathlib
 import shutil
 import tqdm
+import seisbench  # noqa
 
 from typing import Union
 import seisbench.models as sbm  # noqa
+from obspy.geodetics import degrees2kilometers
 
 from core.functions import (date_list, load_stations, daily_picks, associate_pyocto, count_picks,
-                            picks_per_station, get_tmp_picks, associate_gamma, read_velocity_model)
+                            picks_per_station, get_tmp_picks, associate_gamma, read_velocity_model, area_limits)
 from core.utils import nll_wrapper, merge_catalogs
+
+# seisbench.use_backup_repository()
 
 
 def daily_catalog(julday: int,
@@ -32,7 +36,7 @@ def daily_catalog(julday: int,
                   **parameters
                   ):
 
-    # Loop over each station
+    # Loop over each station_picks
     for station in stations["id"]:
         print(station)
         # Picking
@@ -112,6 +116,7 @@ def main(parfile):
         parameters = yaml.safe_load(f)
 
     # Copy parfile and json_file to results
+    # TODO: Instead of taking ".." take the whole path of the project with pathlib
     dirname = os.path.join("..", "results", pathlib.Path(parameters["filename"]).stem)
     if os.path.isdir(dirname) is False:
         os.makedirs(dirname)
@@ -130,6 +135,7 @@ def main(parfile):
     # shutil.copyfile(src=parameters["picking"]["phasenet_model"],
     #                 dst=os.path.join(dirname, pathlib.Path(parameters["picking"]["phasenet_model"]).name))
     pn_model = load_models(phasenet_model=parameters["picking"].pop("phasenet_model"))
+    # pn_model.filter_kwargs["type"] = "bandpass"
 
     # Load stations
     stations = load_stations(station_json=parameters["data"]["stations"])
@@ -160,10 +166,13 @@ def main(parfile):
                                           f'{pathlib.Path(parameters["filename"]).stem}.pyocto')
             # TODO: Define xdist and zdist from lat lon in parameters
             #       Decrease delta for a more accurate initial localisation
+            limits = area_limits(stations=stations)
+            max_degree = max([abs(limits["latitude"][1] - limits["latitude"][0]),
+                              abs(limits["longitude"][1] - limits["longitude"][0])])
             pyocto.VelocityModel1D.create_model(model=vel_model,
-                                                delta=1.,
-                                                xdist=30,
-                                                zdist=20,
+                                                delta=1,
+                                                xdist=degrees2kilometers(degrees=max_degree),
+                                                zdist=max(parameters["association"]["zlim"]),
                                                 path=vel_model_path)
             velocity_model = pyocto.VelocityModel1D(path=vel_model_path,
                                                     tolerance=2.0)
@@ -212,14 +221,15 @@ def main(parfile):
     # Relocate earthquakes in catalog with NonLinLoc
     # TODO: NLL package can used pre calculated travel times. Try to find pre calcualted travel times, instead
     #       of computing new. Especially worthful, when a accurate velocoty model is used
-    if parameters.get("nonlinloc") and len(catalog) > 0:
-        catalog = nll_wrapper(catalog=catalog,
-                              station_json=stations,
-                              nll_basepath=parameters["nonlinloc"]["nll_basepath"],
-                              vel_model=parameters["nonlinloc"]["velocity_model"])
+    # if parameters.get("nonlinloc") and len(catalog) > 0:
+    #     catalog = nll_wrapper(catalog=catalog,
+    #                           station_json=stations,
+    #                           nll_basepath=parameters["nonlinloc"]["nll_basepath"],
+    #                           nll_executable=parameters["nonlinloc"]["nll_executable"],
+    #                           vel_model=parameters["nonlinloc"]["velocity_model"])
 
 
-    # Collect all picks from temporary saved picks and convert picks of each station to single dataframe
+    # Collect all picks from temporary saved picks and convert picks of each station_picks to single dataframe
     picks = get_tmp_picks(dirname=tmp_pick_dirname)
     picks_station = picks_per_station(seisbench_picks=picks)
 
@@ -231,14 +241,14 @@ def main(parfile):
     with open(os.path.join(dirname, f'{pathlib.Path(parameters["filename"]).stem}.picks'), "wb") as handle:
         pickle.dump(obj=picks, file=handle)
 
-    # Save picks for each station
+    # Save picks for each station_picks
     # First, delete existing files
     if os.path.isdir(os.path.join(dirname, "picks")) is True:
         shutil.rmtree(os.path.join(dirname, "picks"))
     if os.path.isdir(os.path.join(dirname, "picks")) is False:
         os.makedirs(os.path.join(dirname, "picks"))
 
-    # Note, picks for each station are saved in csv-format, since functions for plotting are written to read these
+    # Note, picks for each station_picks are saved in csv-format, since functions for plotting are written to read these
     # files. For a later association, all picks are saved as a pickle file.
     for trace_id, station_picks in picks_station.items():
         station_pick_fname = os.path.join(dirname, "picks", f"{trace_id}.csv")

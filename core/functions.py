@@ -5,6 +5,7 @@ import pathlib
 import warnings
 import gc
 
+import matplotlib.pyplot as plt
 import tqdm
 import pickle
 import datetime
@@ -15,8 +16,10 @@ import pandas as pd
 import numpy as np
 from pyproj import Proj
 from typing import Union
+from matplotlib.pyplot import cm
 import seisbench.models as sbm  # noqa
 
+from typing import Optional
 from obspy.core.event.origin import Pick, Origin
 from obspy.core.event.event import Event
 from obspy.core.event.base import WaveformStreamID, Comment, QuantityError
@@ -49,9 +52,15 @@ def date_list(start_date, end_date):
     return date_list
 
 
-def get_waveforms(sds_path: str, station: str, network: str, channel_code: str,
-                  starttime: obspy.UTCDateTime, endtime: obspy.UTCDateTime, location: str = "*"):
-    dates = date_list(start_date=starttime.datetime, end_date=endtime.datetime)
+def get_waveforms(sds_path: str,
+                  station: str,
+                  network: str,
+                  channel_code: str,
+                  starttime: obspy.UTCDateTime,
+                  endtime: obspy.UTCDateTime,
+                  location: str = "*"):
+    dates = date_list(start_date=starttime.datetime,
+                      end_date=endtime.datetime)
     sds_pathname = "{sds_path}/{year}/{network}/{station}/{channel}*/*{julday}"
 
     stream = obspy.Stream()
@@ -127,6 +136,15 @@ def get_daily_waveforms(julday: int,
     # Resample stream
     if sampling_rate:
         stream.resample(sampling_rate=sampling_rate)
+
+    # # Denoise stream
+    # import seisbench.models as sbm # noqa
+    # import torch
+    # model = sbm.SeisDAE.load("/home/jheuel/code/sb_denoiser/new_model_stead_snr20",
+    #                          map_location=torch.device('cpu'))
+    # stream = model.annotate(stream,
+    #                         overlap=2500,
+    #                         blinding=[500, 500])
 
     return stream
 
@@ -605,6 +623,8 @@ def associate_pyocto(station_json: (str, pd.DataFrame),
                     waveform_id=waveform_id,
                     phase_hint=assignments.loc[i, "phase"]
                     )
+        pick.time_errors["uncertainty"] = abs(assignments.loc[i, "residual"])
+
         # Append pick to event_idx in dictionary
         picks_dct[event_idx].append(pick)
 
@@ -1404,6 +1424,140 @@ def manual_seisbench(cat_man: obspy.Catalog,
 
     return event_dict
 
+
+def moveout(catalog: obspy.Catalog,
+            station_json: pd.DataFrame,
+            ax_lat: Optional[plt.axes] = None,
+            ax_lon: Optional[plt.axes] = None,
+            csv_pick_files: Optional[list] = None,
+            ):
+    """
+    Plotting moveout curve from catalog along time and latitude / longitude
+    """
+    # Set color for each line
+    colors = ["tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple", "tab:brown", "tab:pink",
+              "tab:gray", "tab:olive", "tab:cyan"]
+    colors = colors * int(np.ceil(len(catalog) / len(colors)))
+
+    # If pick_files available plot all available picks in grey
+    csv_p_picks = []
+    csv_s_picks = []
+    csv_p_latitudes = []
+    csv_s_latitudes = []
+    csv_p_longitudes = []
+    csv_s_longitudes = []
+    if csv_pick_files:
+        for filename in csv_pick_files:
+            # Find location of station from station_json
+            station_code = pathlib.Path(filename).stem
+            try:
+                station_idx = list(station_json["id"]).index(station_code)
+            except ValueError:
+                continue
+            picks = pd.read_csv(filename)  # Read pick-file
+
+            # Loop over each entry in csv-file
+            for idx in range(len(picks)):
+                if picks.loc[idx, "phase"].lower() == "p":
+                    csv_p_picks.append(obspy.UTCDateTime(picks.loc[idx, "peak_time"]).datetime)
+                    csv_p_latitudes.append(station_json.loc[station_idx, "latitude"])
+                    csv_p_longitudes.append(station_json.loc[station_idx, "longitude"])
+                elif picks.loc[idx, "phase"].lower() == "s":
+                    csv_s_picks.append(obspy.UTCDateTime(picks.loc[idx, "peak_time"]).datetime)
+                    csv_s_latitudes.append(station_json.loc[station_idx, "latitude"])
+                    csv_s_longitudes.append(station_json.loc[station_idx, "longitude"])
+
+        # Plot picks in grey
+        if ax_lat:
+            ax_lat.scatter(x=csv_p_picks,
+                           y=csv_p_latitudes,
+                           color="grey",
+                           alpha=0.35,
+                           rasterized=True)
+        if ax_lon:
+            ax_lon.scatter(x=csv_p_picks,
+                           y=csv_p_longitudes,
+                           color="grey",
+                           alpha=0.35,
+                           rasterized=True)
+
+        # Plot S-picks
+        if ax_lat:
+            ax_lat.scatter(x=csv_s_picks,
+                           y=csv_s_latitudes,
+                           color="grey",
+                           alpha=0.35,
+                           edgecolors=["k"] * len(csv_s_picks),
+                           rasterized=True)
+        if ax_lon:
+            ax_lon.scatter(x=csv_s_picks,
+                           y=csv_s_longitudes,
+                           color="grey",
+                           alpha=0.35,
+                           edgecolors=["k"] * len(csv_s_picks),
+                           rasterized=True)
+
+    for idx, event in enumerate(catalog):
+        # origin_time = event.origins[-1].datetime
+        p_picks = []
+        s_picks = []
+        p_latitudes = []
+        p_longitudes = []
+        s_latitudes = []
+        s_longitudes = []
+        for pick in event.picks:
+            # Find latitude and longitude of station
+            station_code = (f"{pick.waveform_id.network_code}.{pick.waveform_id.station_code}."
+                            f"{pick.waveform_id.location_code}")
+            try:
+                station_idx = list(station_json["id"]).index(station_code)
+            except ValueError:
+                continue
+
+            if pick.phase_hint.lower() in ["p", "pg", "pn"]:
+                p_picks.append(pick.time.datetime)
+                p_latitudes.append(station_json.loc[station_idx, "latitude"])
+                p_longitudes.append(station_json.loc[station_idx, "longitude"])
+            elif pick.phase_hint.lower() in ["s", "sg", "sn"]:
+                s_picks.append(pick.time.datetime)
+                s_latitudes.append(station_json.loc[station_idx, "latitude"])
+                s_longitudes.append(station_json.loc[station_idx, "longitude"])
+
+        # Sort latitudes
+        # zipped = zip(p_latitudes, p_picks)
+
+        # Plot moveout
+        # ax.plot(p_picks,
+        #         p_latitudes,
+        #         color="grey",
+        #         linestyle="--",
+        #         linewidth=0.5)
+
+        # Plot P-picks
+        if ax_lat:
+            ax_lat.scatter(x=p_picks,
+                           y=p_latitudes,
+                           color=colors[idx],
+                           rasterized=True)
+        if ax_lon:
+            ax_lon.scatter(x=p_picks,
+                           y=p_longitudes,
+                           color=colors[idx],
+                           rasterized=True)
+
+        # Plot S-picks
+        if ax_lat:
+            ax_lat.scatter(x=s_picks,
+                           y=s_latitudes,
+                           color=colors[idx],
+                           edgecolors=["k"] * len(s_picks),
+                           rasterized=True)
+        if ax_lon:
+            ax_lon.scatter(x=s_picks,
+                           y=s_longitudes,
+                           color=colors[idx],
+                           edgecolors=["k"] * len(s_picks),
+                           rasterized=True)
 
 
 if __name__ == "__main__":

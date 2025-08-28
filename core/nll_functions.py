@@ -8,7 +8,8 @@ from obspy.core.event import read_events, Catalog
 
 from core.functions import load_stations, area_limits
 
-
+# TODO: If travel times are given, do not compute new travel times! Then, only run NLL and do everything for
+#  observation (obs files)
 class Event2NLL:
 
     def __init__(self,
@@ -68,7 +69,7 @@ class Event2NLL:
                 for pick in event.picks:
                     datetime_str = pick.time.datetime.strftime("%Y%m%d %H%M %S.%f")
                     f_obs.write(s.format(pick.waveform_id.station_code,
-                                         "Z",
+                                         "?",
                                          pick.phase_hint.upper(),
                                          datetime_str,
                                          pick.time_errors.uncertainty))
@@ -122,7 +123,7 @@ class Event2NLL:
                          f"{os.path.join(self.nll_basepath, 'time', self.config_name)} {gtfile.upper()}\n")
             f_conf.write("GTMODE GRID2D ANGLES_YES\n\n")
 
-            # Write all station names and locations from json file to config
+            # Write all station_picks names and locations from json file to config
             for index in range(len(self.df_stations)):
                 f_conf.write(f"GTSRCE {self.df_stations['id'][index].split('.')[1]} LATLON "
                              f"{self.df_stations['latitude'][index]} {self.df_stations['longitude'][index]} 0 0\n")
@@ -149,7 +150,10 @@ class Event2NLL:
             f_conf.write("# END of NLLoc control file statements\n")
 
     def __read_velocity_model(self):
-        self.df_vel_model = pd.read_csv(self.vel_model)
+        if isinstance(self.vel_model, str):
+            self.df_vel_model = pd.read_csv(self.vel_model)
+        elif isinstance(self.vel_model, pd.DataFrame):
+            self.df_vel_model = self.vel_model
 
     def run_vel2grid(self):
         execute = os.path.join(self.nll_executables, 'Vel2Grid')
@@ -209,7 +213,7 @@ def update_events_from_nll(station_json,
             else:
                 event_lst.append(nll_event)
 
-    # Since NonLinLoc only works with station names and not with station and network names, the network needs to
+    # Since NonLinLoc only works with station_picks names and not with station_picks and network names, the network needs to
     # be added to each single pick for each event in event_lst
     # Load station_json as pandas dataframe
     if isinstance(station_json, pd.DataFrame):
@@ -233,7 +237,7 @@ def update_events_from_nll(station_json,
 def check_nll_time(station_json: str,
                    nll_basepath: str):
     """
-    Check whether for each station all required files in time directory exist.
+    Check whether for each station_picks all required files in time directory exist.
     If all files exist, function returns True, otherwise False
     :param station_json:
     :param nll_basepath:
