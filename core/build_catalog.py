@@ -117,7 +117,7 @@ def main(parfile):
 
     # Copy parfile and json_file to results
     # TODO: Instead of taking ".." take the whole path of the project with pathlib
-    dirname = os.path.join("..", "results", pathlib.Path(parameters["filename"]).stem)
+    dirname = os.path.join(os.getcwd(), "results", pathlib.Path(parameters["filename"]).stem)
     if os.path.isdir(dirname) is False:
         os.makedirs(dirname)
     try:
