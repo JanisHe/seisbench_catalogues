@@ -117,7 +117,7 @@ def main(parfile):
 
     # Copy parfile and json_file to results
     # TODO: Instead of taking ".." take the whole path of the project with pathlib
-    dirname = os.path.join(os.getcwd(), "results", pathlib.Path(parameters["filename"]).stem)
+    dirname = os.path.join("..", "results", pathlib.Path(parameters["filename"]).stem)
     if os.path.isdir(dirname) is False:
         os.makedirs(dirname)
     try:
@@ -237,7 +237,7 @@ def main(parfile):
     # Save picks as pickle and catalog as xmlin separate directory
     catalog_filename = os.path.join(dirname, parameters["filename"])
     catalog.write(filename=catalog_filename, format="QUAKEML")
-    print(f"Wrote {len(catalog)} events to final catalogue.")
+    print(f"Wrote {len(catalog)} events to final catalogue\nPathname: {catalog_filename}).")
     with open(os.path.join(dirname, f'{pathlib.Path(parameters["filename"]).stem}.picks'), "wb") as handle:
         pickle.dump(obj=picks, file=handle)
 
